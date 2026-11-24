@@ -53,11 +53,14 @@ const DETAIL_FIELDS = [
   { key: 'directions', column: 18, header: 'Directions', max: 1500, kind: 'line' },
   { key: 'otherDetails', column: 19, header: 'Other details', max: 3000, kind: 'lines' },
   { key: 'labelText', column: 20, header: 'Label text', max: 5000, kind: 'lines' },
+  // What a QR code on the pack holds. A person types, pastes or scans it in: Claude is not asked
+  // for it, because a photo cannot be relied on to decode one and a guessed link would look real.
+  { key: 'qrCode', column: 21, header: 'QR code', max: 2000, kind: 'line', readFromPhoto: false },
 ];
 const IMAGE_COLUMN = 9;
-const PRODUCT_COLUMN_COUNT = 20;
+const PRODUCT_COLUMN_COUNT = 21;
 
-// Headers for the columns setup() adds, G to T, in sheet order.
+// Headers for the columns setup() adds, G to U, in sheet order.
 const FIRST_ADDED_COLUMN = 7;
 const ADDED_HEADERS = [];
 for (let column = FIRST_ADDED_COLUMN; column <= PRODUCT_COLUMN_COUNT; column++) {
@@ -313,7 +316,7 @@ const LABEL_INSTRUCTIONS = [
 ]).join('\n');
 
 const DETAIL_PROPERTIES = {};
-DETAIL_FIELDS.forEach((field) => {
+DETAIL_FIELDS.filter((field) => field.readFromPhoto !== false).forEach((field) => {
   DETAIL_PROPERTIES[field.key] = { type: 'string' };
 });
 DETAIL_PROPERTIES.otherDetails = {
@@ -429,7 +432,7 @@ function cleanDetails(source) {
   const details = {};
   DETAIL_FIELDS.forEach((field) => {
     const raw = field.key === 'otherDetails' ? detailLines(source.otherDetails) : source[field.key];
-    details[field.key] = cleanDetail(field, raw);
+    details[field.key] = field.readFromPhoto === false ? '' : cleanDetail(field, raw);
   });
   return details;
 }
@@ -776,7 +779,7 @@ function writeNewProduct(sheet, row, product) {
   sheet.getRange(row, 1, 1, PRODUCT_COLUMN_COUNT).setValues([productCells(product)]);
 }
 
-/** One Products row, A to T, for a product. The photo link (I) is left blank; it is set separately. */
+/** One Products row, A to U, for a product. The photo link (I) is left blank; it is set separately. */
 function productCells(product) {
   const cells = new Array(PRODUCT_COLUMN_COUNT).fill('');
   cells[0] = product.code;
@@ -862,9 +865,15 @@ function readSettings(ss) {
 
 function readProducts(ss) {
   const sheet = requireSheet(ss, SHEET.products);
-  const isSetUp = sheet.getMaxColumns() >= PRODUCT_COLUMN_COUNT
-    && sheet.getRange(1, PRODUCT_COLUMN_COUNT).getValue() === ADDED_HEADERS[ADDED_HEADERS.length - 1];
-  if (!isSetUp) throw new AppError('not_configured', 'The Products tab is not prepared. Run setup() in the Apps Script editor.');
+  const headerAt = (column) => (sheet.getMaxColumns() >= column ? sheet.getRange(1, column).getValue() : '');
+  if (headerAt(PRODUCT_COLUMN_COUNT) !== ADDED_HEADERS[ADDED_HEADERS.length - 1]) {
+    if (headerAt(FIRST_ADDED_COLUMN) !== ADDED_HEADERS[0]) {
+      throw new AppError('not_configured', 'The Products tab is not prepared. Run setup() in the Apps Script editor.');
+    }
+    // Prepared by an earlier version of this script: add the columns introduced since, so a new
+    // version works as soon as it is deployed. Writing the same headers twice is harmless.
+    prepareProductsTab(sheet);
+  }
 
   const timeZone = ss.getSpreadsheetTimeZone();
   return sheet.getRange(PRODUCT_FIRST_ROW, 1, PRODUCT_ROW_COUNT, PRODUCT_COLUMN_COUNT).getValues()
@@ -1212,30 +1221,7 @@ function buildMissingTabs(ss) {
 function setup() {
   const ss = spreadsheet();
   const builtTabs = buildMissingTabs(ss);
-  const products = requireSheet(ss, SHEET.products);
-
-  const lastProductRow = PRODUCT_FIRST_ROW + PRODUCT_ROW_COUNT - 1;
-  if (products.getMaxRows() < lastProductRow) {
-    products.insertRowsAfter(products.getMaxRows(), lastProductRow - products.getMaxRows());
-  }
-  if (products.getMaxColumns() < PRODUCT_COLUMN_COUNT) {
-    products.insertColumnsAfter(products.getMaxColumns(), PRODUCT_COLUMN_COUNT - products.getMaxColumns());
-  }
-
-  // G1:T1 may only hold our headers or the workbook's original fill-in note; anything else is the owner's.
-  const headerRange = products.getRange(1, FIRST_ADDED_COLUMN, 1, ADDED_HEADERS.length);
-  const unexpected = headerRange.getValues()[0].filter((cell, index) =>
-    cell !== '' && cell !== ADDED_HEADERS[index] && String(cell).indexOf('Names and sizes read') !== 0);
-  if (unexpected.length > 0) {
-    throw new Error('Products!G1:T1 already holds other content ("' + unexpected[0] + '"). Clear those cells, then run setup() again.');
-  }
-  headerRange.setValues([ADDED_HEADERS]);
-
-  // Plain text keeps what was read off the label exactly: a barcode's leading zeros, a batch number
-  // like "1E5", and "2028-07" would otherwise be rewritten by Sheets as numbers or dates.
-  DETAIL_FIELDS.filter((field) => field.key !== 'name').forEach((field) => {
-    products.getRange(PRODUCT_FIRST_ROW, field.column, PRODUCT_ROW_COUNT, 1).setNumberFormat('@');
-  });
+  prepareProductsTab(requireSheet(ss, SHEET.products));
 
   if (!ss.getSheetByName(SHEET.requests)) {
     const log = ss.insertSheet(SHEET.requests);
@@ -1268,6 +1254,32 @@ function setup() {
   ].join(' ');
   console.log(summary);
   return summary;
+}
+
+/** Gives the Products tab its rows, the columns this script adds (G to U), their headers and text format. Safe to repeat. */
+function prepareProductsTab(products) {
+  const lastProductRow = PRODUCT_FIRST_ROW + PRODUCT_ROW_COUNT - 1;
+  if (products.getMaxRows() < lastProductRow) {
+    products.insertRowsAfter(products.getMaxRows(), lastProductRow - products.getMaxRows());
+  }
+  if (products.getMaxColumns() < PRODUCT_COLUMN_COUNT) {
+    products.insertColumnsAfter(products.getMaxColumns(), PRODUCT_COLUMN_COUNT - products.getMaxColumns());
+  }
+
+  // G1:U1 may only hold our headers or the workbook's original fill-in note; anything else is the owner's.
+  const headerRange = products.getRange(1, FIRST_ADDED_COLUMN, 1, ADDED_HEADERS.length);
+  const unexpected = headerRange.getValues()[0].filter((cell, index) =>
+    cell !== '' && cell !== ADDED_HEADERS[index] && String(cell).indexOf('Names and sizes read') !== 0);
+  if (unexpected.length > 0) {
+    throw new AppError('not_configured', 'Products!G1:U1 already holds other content ("' + unexpected[0] + '"). Clear those cells, then run setup() again.');
+  }
+  headerRange.setValues([ADDED_HEADERS]);
+
+  // Plain text keeps what was read off the label exactly: a barcode's leading zeros, a batch number
+  // like "1E5", and "2028-07" would otherwise be rewritten by Sheets as numbers or dates.
+  DETAIL_FIELDS.filter((field) => field.key !== 'name').forEach((field) => {
+    products.getRange(PRODUCT_FIRST_ROW, field.column, PRODUCT_ROW_COUNT, 1).setNumberFormat('@');
+  });
 }
 
 function createPhotoFolder() {

@@ -11,12 +11,17 @@ export type AdjustmentKind = (typeof adjustmentKinds)[number];
 /** Every product detail the app keeps, all as text. Mirrors DETAIL_FIELDS in apps-script/Code.gs. */
 export const DETAIL_KEYS = [
   'name', 'size', 'barcode', 'category', 'expiry', 'brand', 'variant', 'description', 'batchNumber', 'manufactureDate',
-  'manufacturer', 'countryOfOrigin', 'ingredients', 'directions', 'otherDetails', 'labelText',
+  'manufacturer', 'countryOfOrigin', 'ingredients', 'directions', 'otherDetails', 'labelText', 'qrCode',
 ] as const;
 export type DetailKey = (typeof DETAIL_KEYS)[number];
 export type ProductDetails = Record<DetailKey, string>;
 
-const productDetailsShape = Object.fromEntries(DETAIL_KEYS.map((key) => [key, z.string()])) as Record<DetailKey, z.ZodString>;
+const productDetailsShape = {
+  ...(Object.fromEntries(DETAIL_KEYS.map((key) => [key, z.string()])) as Record<DetailKey, z.ZodString>),
+  // Added after the first release. The app and the Apps Script are deployed separately, so a
+  // script that has not been updated yet leaves it out; the app must still load.
+  qrCode: z.string().default(''),
+};
 
 export const productSchema = z.object({
   ...productDetailsShape,

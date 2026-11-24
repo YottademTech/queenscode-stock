@@ -28,6 +28,13 @@ export function ProductDetailFields({ value, onChange, nameReadOnly = false, nam
           />
         ))}
       </div>
+      {/* Claude does not fill this one: a photo cannot be relied on to decode a QR code. */}
+      <TextField
+        label="QR code"
+        value={value.qrCode}
+        hint="Optional, like the barcode. Type, paste or scan in what the code holds."
+        onChange={(qrCode) => onChange({ qrCode })}
+      />
 
       <details className="disclosure">
         <summary>

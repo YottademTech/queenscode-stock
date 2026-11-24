@@ -17,6 +17,9 @@ export function filledCount(details: ProductDetails, keys: readonly DetailKey[])
   return keys.filter((key) => details[key].trim() !== '').length;
 }
 
+/** The same limit the server applies to what a QR code holds. */
+const QR_CODE_MAX = 2000;
+
 const DAY_OR_MONTH = /^\d{4}-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?$/;
 
 /** What the server would refuse, in words the person filling the form can act on. */
@@ -24,6 +27,7 @@ export function detailProblems(details: ProductDetails): string[] {
   const problems: string[] = [];
   if (details.name.trim() === '') problems.push('Enter the product name.');
   if (!/^\d*$/.test(details.barcode.trim())) problems.push('The barcode must be digits only.');
+  if (details.qrCode.trim().length > QR_CODE_MAX) problems.push(`The QR code text is too long (max ${QR_CODE_MAX} characters).`);
   if (details.expiry.trim() !== '' && !DAY_OR_MONTH.test(details.expiry.trim())) {
     problems.push('Write the expiry as YYYY-MM-DD or YYYY-MM.');
   }

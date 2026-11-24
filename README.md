@@ -8,7 +8,7 @@ web/           React app (Vite + TypeScript) for phones
 apps-script/   Code.gs: the backend, pasted into the Sheet's Apps Script project
 ```
 
-The data contract (tabs and columns) is in `STOCK_APP_BRIEF.md`. The app adds columns G to T to
+The data contract (tabs and columns) is in `STOCK_APP_BRIEF.md`. The app adds columns G to U to
 Products and one hidden tab, `App_Requests`.
 
 ## What Claude records about a product
@@ -19,6 +19,10 @@ product photo link, brand, variant, description, batch number, manufacture date,
 country of origin, ingredients, directions, **Other details** (any other fact, one per line, such
 as claims, warnings or registration numbers) and **Label text** (all legible text, word for word).
 Claude leaves a field empty when the photo does not show it.
+
+Each row also has a **QR code** column for what a QR code on the pack holds. Claude is not asked
+for it, because a photo cannot be relied on to decode one: staff type, paste or scan it in. Like
+the barcode, it is optional.
 
 ## Where stock is kept
 

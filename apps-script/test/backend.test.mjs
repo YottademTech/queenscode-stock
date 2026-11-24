@@ -18,7 +18,10 @@ const saveCounts = (rows, overrides = {}) => ({
 const noDetails = {
   name: '', size: '', barcode: '', category: '', expiry: '', brand: '', variant: '', description: '', batchNumber: '',
   manufactureDate: '', manufacturer: '', countryOfOrigin: '', ingredients: '', directions: '', otherDetails: '', labelText: '',
+  qrCode: '',
 };
+// Claude is asked for every detail except what a QR code holds, which a person enters.
+const detailsAskedOfClaude = Object.keys(noDetails).filter((key) => key !== 'qrCode');
 // One item of Claude's answer: the same fields, except otherDetails is a list of label and value pairs.
 const countedItem = (overrides = {}) => ({
   ...noDetails, otherDetails: [], productCode: 'RG-BLK-500',
@@ -137,7 +140,9 @@ test('a count photo is sent to Claude with the product list and comes back as un
   assert.equal(sent.body.output_config.format.type, 'json_schema');
   assert.deepEqual(sent.body.messages[0].content[0], { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: PHOTO.data } });
   assert.match(sent.body.messages[0].content[1].text, /Location: Shop shelf/);
-  assert.deepEqual(sent.body.output_config.format.schema.properties.items.items.required.slice(0, 16), Object.keys(noDetails));
+  const itemSchema = sent.body.output_config.format.schema.properties.items.items;
+  assert.deepEqual(itemSchema.required.slice(0, detailsAskedOfClaude.length), detailsAskedOfClaude);
+  assert.equal('qrCode' in itemSchema.properties, false, 'Claude is never asked to decode a QR code');
   assert.match(sent.body.messages[0].content[1].text, /RG-BLK-500 \| Rich Glow Advanced Whitening Lotion \(Black\) \| 500ml/);
 });
 
@@ -225,6 +230,7 @@ test('everything Claude reads off a product photo is returned, with nothing inve
         { label: 'FDA reg. no.', value: 'FDA/C  19-0123' }, { label: 'Empty', value: ' ' }, 'not a pair',
       ],
       labelText: '  QBH \r\n\r\nROSE WATER   TONER\n200ml  ',
+      qrCode: 'https://invented.example/rose-toner',
       note: 'Barcode partly covered.',
     })],
   });
@@ -235,11 +241,12 @@ test('everything Claude reads off a product photo is returned, with nothing inve
     manufactureDate: '',
     otherDetails: 'Claim: Alcohol free\nFor external use only\nFDA reg. no.: FDA/C 19-0123',
     labelText: 'QBH\nROSE WATER TONER\n200ml',
+    qrCode: '',
     note: 'Barcode partly covered.',
   });
   const [sent] = backend.recorded.claudeRequests;
   assert.equal(sent.body.output_config.effort, 'medium');
-  assert.deepEqual(sent.body.output_config.format.schema.required, [...Object.keys(noDetails), 'note']);
+  assert.deepEqual(sent.body.output_config.format.schema.required, [...detailsAskedOfClaude, 'note']);
 });
 
 // --- Saving counts ---------------------------------------------------------
@@ -292,16 +299,16 @@ test('a product Claude did not recognise is added to Products once and counted u
 
 test('every detail of a new product is stored in the Products tab and comes back when the app loads', () => {
   const backend = loadBackend();
-  const details = { ...fullLabel, otherDetails: 'Claim: Alcohol free\n=SUM(1)', labelText: 'QBH\nROSE WATER TONER\n200ml' };
+  const details = { ...fullLabel, otherDetails: 'Claim: Alcohol free\n=SUM(1)', labelText: 'QBH\nROSE WATER TONER\n200ml', qrCode: 'https://qbh.example/p/rose-toner?batch=1E5' };
 
   const reply = backend.post(saveCounts([countRow({ productCode: null, newProduct: details, loosePieces: 6 })]));
   assert.equal(reply.ok, true);
 
-  assert.deepEqual(backend.workbook.get('Products').rowValues(4, 20), [
+  assert.deepEqual(backend.workbook.get('Products').rowValues(4, 21), [
     'QBHRWT-200', 'QBH Rose Water Toner', '200ml', '0603400012345', '', '', 'Toner', '2028-10', '',
     'QBH', 'Rose water', 'Clear pink toner in a tall bottle with a white flip cap.', '1E5', '2025-10',
     'QBH Cosmetics Ltd, Accra', 'Ghana', 'Aqua, Rosa Damascena Flower Water, Glycerin', 'Apply with a cotton pad after cleansing.',
-    'Claim: Alcohol free\n=SUM(1)', 'QBH\nROSE WATER TONER\n200ml',
+    'Claim: Alcohol free\n=SUM(1)', 'QBH\nROSE WATER TONER\n200ml', 'https://qbh.example/p/rose-toner?batch=1E5',
   ]);
 
   const saved = backend.post({ action: 'bootstrap' }).data.products[2];
@@ -414,9 +421,9 @@ test('editing a product fills its details and photo but leaves its code and name
     'RG-YEL', 'Rich Glow Yellow Tone Lotion', '500ml', '0123456789012', 24, 6, 'Body oil', '2030-08-19', 'https://drive.google.com/file/d/file-1/view',
   ]);
 
-  const withoutPhoto = backend.post(saveProduct({ code: 'RG-YEL', packSize: null, reorderLevel: null, brand: 'Rich Glow', labelText: 'RICH GLOW\nYELLOW TONE' }, { requestId: 'request-0101' }));
+  const withoutPhoto = backend.post(saveProduct({ code: 'RG-YEL', packSize: null, reorderLevel: null, brand: 'Rich Glow', labelText: 'RICH GLOW\nYELLOW TONE', qrCode: '=HYPERLINK("http://evil")' }, { requestId: 'request-0101' }));
   assert.equal(withoutPhoto.ok, true);
-  assert.deepEqual(backend.workbook.get('Products').rowValues(3, 20).slice(9), ['Rich Glow', '', '', '', '', '', '', '', '', '', 'RICH GLOW\nYELLOW TONE']);
+  assert.deepEqual(backend.workbook.get('Products').rowValues(3, 21).slice(9), ['Rich Glow', '', '', '', '', '', '', '', '', '', 'RICH GLOW\nYELLOW TONE', '\'=HYPERLINK("http://evil")']);
   assert.deepEqual(productRows(backend.workbook)[1].slice(4), ['', '', 'Body oil', '2030-08-19', 'https://drive.google.com/file/d/file-1/view']);
 });
 
@@ -472,9 +479,9 @@ test('setup prepares an untouched workbook and is safe to run again', () => {
   const summary = backend.context.setup();
 
   const products = workbook.get('Products');
-  assert.deepEqual(products.rowValues(1, 20).slice(6), ADDED_HEADERS);
+  assert.deepEqual(products.rowValues(1, 21).slice(6), ADDED_HEADERS);
   // Every detail column except the name is plain text, so Sheets cannot rewrite what was read off a label.
-  assert.deepEqual(products.formats.map((entry) => entry.column), [3, 4, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+  assert.deepEqual(products.formats.map((entry) => entry.column), [3, 4, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
   assert.ok(products.formats.every((entry) => entry.format === '@'));
   assert.equal(workbook.get('App_Requests').hidden, true);
   assert.equal(workbook.get('Form_Adjustments').getLastRow(), 1, 'the EXAMPLE correction must not count as stock');
@@ -488,6 +495,39 @@ test('setup prepares an untouched workbook and is safe to run again', () => {
   backend.context.setup();
   assert.equal(backend.recorded.folders.length, 1);
   assert.equal(workbook.get('Form_Adjustments').getLastRow(), 2, 'a real entry is never removed');
+});
+
+test('a Sheet prepared by the version before the QR code column brings itself up to date on first use', () => {
+  const workbook = makeWorkbook();
+  const products = workbook.get('Products');
+  // As the earlier setup() left it: 20 columns, the last header "Label text".
+  products.write(1, 21, '');
+  products.maxColumns = 20;
+  const backend = loadBackend({ workbook });
+
+  const loaded = backend.post({ action: 'bootstrap' });
+  assert.equal(loaded.ok, true);
+  assert.deepEqual(loaded.data.products.map((product) => product.qrCode), ['', '']);
+  assert.deepEqual(products.rowValues(1, 21).slice(6), ADDED_HEADERS);
+  assert.ok(products.formats.some((entry) => entry.column === 21 && entry.format === '@'));
+
+  // An app from before the field existed sends no qrCode; the save still goes through.
+  assert.equal(backend.post(saveProduct({})).ok, true);
+  assert.equal(backend.post(saveProduct({ name: 'QBH Shea Butter', qrCode: 'QBH-SHEA-01' }, { requestId: 'request-0102' })).ok, true);
+  assert.deepEqual(backend.post({ action: 'bootstrap' }).data.products.map((product) => product.qrCode), ['', '', '', 'QBH-SHEA-01']);
+
+  const tooLong = backend.post(saveProduct({ name: 'QBH Long', qrCode: 'a'.repeat(2001) }, { requestId: 'request-0103' }));
+  assert.match(tooLong.error.message, /qr code is too long/);
+});
+
+test('a Sheet whose next free header cell the owner has used is not overwritten when the app loads', () => {
+  const workbook = makeWorkbook();
+  workbook.get('Products').write(1, 21, 'Supplier');
+  const reply = loadBackend({ workbook }).post({ action: 'bootstrap' });
+
+  assert.equal(reply.error.code, 'not_configured');
+  assert.match(reply.error.message, /already holds other content \("Supplier"\)/);
+  assert.equal(workbook.get('Products').read(1, 21), 'Supplier');
 });
 
 test('setup refuses to overwrite header cells the owner has used for something else', () => {

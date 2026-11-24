@@ -87,10 +87,11 @@ describe('counting from photos', () => {
     expect(rowProblems(sackRow!, [], sack)).toContain('This product is no longer in the Sheet. Choose it again.');
 
     expect(rowProblems(newRow!, [], sack)).toEqual([]);
-    const broken = { ...newRow!, newProduct: { ...newRow!.newProduct, name: ' ', barcode: '12a', expiry: '06-08-2030', manufactureDate: 'Aug 2025' } };
+    const broken = { ...newRow!, newProduct: { ...newRow!.newProduct, name: ' ', barcode: '12a', qrCode: 'x'.repeat(2001), expiry: '06-08-2030', manufactureDate: 'Aug 2025' } };
     expect(rowProblems(broken, [], sack)).toEqual([
       'Enter the product name.',
       'The barcode must be digits only.',
+      'The QR code text is too long (max 2000 characters).',
       'Write the expiry as YYYY-MM-DD or YYYY-MM.',
       'Write the manufacture date as YYYY-MM-DD or YYYY-MM.',
     ]);

@@ -88,10 +88,10 @@ export class FakeSheet {
   hideSheet() { this.hidden = true; }
 }
 
-// Products G to T, as setup() writes them.
+// Products G to U, as setup() writes them.
 export const ADDED_HEADERS = [
   'Category', 'Expiry date', 'Product image', 'Brand', 'Variant', 'Description', 'Batch number', 'Manufacture date',
-  'Manufacturer', 'Country of origin', 'Ingredients', 'Directions', 'Other details', 'Label text',
+  'Manufacturer', 'Country of origin', 'Ingredients', 'Directions', 'Other details', 'Label text', 'QR code',
 ];
 
 export const COUNT_DATE = new Date(Date.UTC(2026, 10, 23));
@@ -104,7 +104,7 @@ export function makeWorkbook({ prepared = true } = {}) {
     ['Adjustment type: correct', 'Correct the count'], ['Adjustment type: add', 'Add stock'],
     ['Adjustment type: remove', 'Remove stock'],
   ]);
-  const products = new FakeSheet('Products', 201, prepared ? 20 : 8).fill(1, [
+  const products = new FakeSheet('Products', 201, prepared ? 21 : 8).fill(1, [
     ['Code', 'Product name', 'Size', 'Barcode number', 'Pack size (pieces per carton)', 'Reorder level (pieces)',
       ...(prepared ? ADDED_HEADERS : ['', 'Names and sizes read from the shelf photos.'])],
     ['RG-BLK-500', 'Rich Glow Advanced Whitening Lotion (Black)', '500ml'],
