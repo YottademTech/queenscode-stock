@@ -1,0 +1,394 @@
+:root {
+  /* QueensCode brand: sparkling gold on black. Content stays light so forms read in daylight. */
+  --black: #0b0b0c;
+  --gold: #d4af37;
+  --gold-bright: #f7e08a;
+  --gold-deep: #a17c1b;
+  --gold-shine: linear-gradient(120deg, #b8891f 0%, #f7e08a 26%, #d4af37 50%, #fff3b0 68%, #c9a227 100%);
+  --ink: #171512;
+  --muted: #5e584a;
+  --surface: #ffffff;
+  --page: #f7f3ea;
+  /* A warm wash for a group inside a white surface, in place of an outline. */
+  --tint: #f6f1e4;
+  --hairline: rgb(54 40 8 / 0.1);
+  /* The one outline kept: a field's edge must stay visible against white (3:1). */
+  --field-line: #8f8771;
+  --danger: #b42318;
+  --danger-bg: #fef1ef;
+  --warn: #8a4b00;
+  --warn-bg: #fff5e0;
+  --ok: #17603a;
+  --ok-bg: #e8f6ee;
+  --info-bg: #fbf3d6;
+
+  /* Surfaces are lifted by soft shadow, not boxed by borders. */
+  --lift: 0 1px 2px rgb(54 40 8 / 0.05), 0 12px 28px -16px rgb(54 40 8 / 0.28);
+  --lift-high: 0 2px 4px rgb(54 40 8 / 0.08), 0 20px 36px -18px rgb(54 40 8 / 0.5);
+  --glow: 0 12px 26px -12px rgb(184 137 31 / 0.8);
+
+  /* Spacing and corners breathe with the width of the phone. */
+  --gutter: clamp(0.9rem, 4.6vw, 1.4rem);
+  --pad: clamp(0.9rem, 4.2vw, 1.25rem);
+  --round-l: clamp(1.25rem, 5.6vw, 1.75rem);
+  --round-m: 1.1rem;
+  --round-s: 0.85rem;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  --nav-height: 3.5rem;
+  /* Room under the navigation for a phone's home bar. Phones report their own; where a phone or a
+     preview frame reports none, 1rem still keeps the labels clear of the bar drawn over the page. */
+  --nav-clearance: max(env(safe-area-inset-bottom, 0px), 1rem);
+  --dock-inset: 0.75rem;
+  /* From the bottom of the screen to the top of the floating navigation. */
+  --dock-top: calc(var(--nav-clearance) + var(--nav-height) + 0.6rem);
+  --app-width: 32rem;
+
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+* { box-sizing: border-box; }
+/* Scroll padding keeps a focused field clear of the pinned top bar and bottom navigation. */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; scroll-padding: 5.5rem 0 10rem; -webkit-tap-highlight-color: transparent; }
+button, label, select, summary { touch-action: manipulation; }
+[hidden] { display: none !important; }
+
+body { margin: 0; background: radial-gradient(60rem 40rem at 50% -10%, #2b2618, #121110 70%); background-attachment: fixed; }
+
+/* One phone-width column, also on a laptop, so the app looks the same everywhere. */
+.app {
+  position: relative; max-width: var(--app-width); margin: 0 auto; min-height: 100vh; min-height: 100dvh;
+  /* A breath of gold under the header, fading into the page. */
+  background: radial-gradient(90% 16rem at 50% 0, rgb(212 175 55 / 0.2), transparent) no-repeat, var(--page);
+}
+/* Content fades out behind the floating navigation instead of being cut off by it. */
+.app::after {
+  content: ''; position: fixed; z-index: 1; bottom: 0; left: 50%; transform: translateX(-50%); pointer-events: none;
+  width: 100%; max-width: var(--app-width); height: calc(var(--dock-top) + 2.25rem);
+  background: linear-gradient(to bottom, rgb(247 243 234 / 0), var(--page) 62%);
+}
+
+.page {
+  padding: 1rem max(var(--gutter), env(safe-area-inset-right)) calc(var(--dock-top) + 2.25rem) max(var(--gutter), env(safe-area-inset-left));
+  overflow-wrap: anywhere;
+}
+
+h1 { font-size: 1.35rem; margin: 0; }
+h2, h3 { font-family: Georgia, 'Times New Roman', serif; font-weight: 700; letter-spacing: -0.01em; text-wrap: balance; }
+h2 { font-size: clamp(1.5rem, 6.6vw, 1.85rem); line-height: 1.15; margin: 0.6rem 0 0.9rem; }
+/* A short stroke of gold under each screen title. */
+h2::after { content: ''; display: block; width: 2.5rem; height: 0.2rem; margin-top: 0.5rem; border-radius: 1rem; background: var(--gold-shine); }
+h3 { font-size: 1.2rem; margin: 1.5rem 0 0.3rem; }
+.card > h3:first-child { margin-top: 0.1rem; }
+p { margin: 0.45rem 0; }
+ul { margin: 0; padding: 0; list-style: none; }
+
+.app-bar {
+  position: sticky; top: 0; z-index: 3;
+  display: grid; grid-template-columns: 1fr minmax(7.5rem, 40%); gap: 0.75rem; align-items: center;
+  padding: calc(0.8rem + env(safe-area-inset-top)) max(var(--gutter), env(safe-area-inset-right)) 0.95rem max(var(--gutter), env(safe-area-inset-left));
+  color: #fff;
+  background:
+    radial-gradient(120% 150% at 0% 0%, rgb(212 175 55 / 0.26), transparent 55%),
+    radial-gradient(80% 130% at 100% 110%, rgb(212 175 55 / 0.14), transparent 60%),
+    var(--black);
+  /* The header curves into the page instead of ending on a ruled line. */
+  border-radius: 0 0 var(--round-l) var(--round-l);
+  box-shadow: 0 14px 30px -18px rgb(0 0 0 / 0.7);
+}
+.brand { display: flex; align-items: center; gap: 0.65rem; min-width: 0; }
+.brand-logo { width: 2.75rem; height: 2.75rem; border-radius: 0.85rem; object-fit: cover; flex: none; box-shadow: 0 0 0 1px rgb(247 224 138 / 0.4); }
+.app-bar h1 {
+  /* Serif capitals with wide spacing, after the QueensCode logo lettering. */
+  font-family: Georgia, 'Times New Roman', serif; font-size: clamp(1rem, 4.6vw, 1.15rem); font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; width: fit-content;
+  /* The title is painted with the gold gradient; plain gold is the fallback colour. */
+  color: var(--gold); background: var(--gold-shine) 0 0 / 220% 100%; -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  animation: sparkle 6s ease-in-out infinite alternate;
+}
+@keyframes sparkle { to { background-position: 100% 0; } }
+.stocktake { color: #cfc8b4; font-size: 0.8rem; margin: 0.1rem 0 0; }
+.stocktake strong { white-space: nowrap; color: var(--gold-bright); }
+.app-bar .counter input[type='text'] {
+  min-height: 2.75rem; padding-inline: 1rem; border-radius: 10rem;
+  background: rgb(255 255 255 / 0.08); color: #fff; border-color: rgb(247 224 138 / 0.55);
+}
+.app-bar .counter input::placeholder { color: #c3bba5; opacity: 1; }
+
+/* The navigation floats above the page as a dock. */
+.bottom-nav {
+  position: fixed; z-index: 3; bottom: var(--nav-clearance); left: 50%; transform: translateX(-50%);
+  width: calc(100% - 2 * var(--dock-inset) - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+  max-width: calc(var(--app-width) - 2 * var(--dock-inset));
+  display: grid; grid-template-columns: repeat(4, 1fr); padding: 0.3rem;
+  background: rgb(11 11 12 / 0.94); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  border-radius: 10rem;
+  box-shadow: 0 18px 34px -14px rgb(0 0 0 / 0.75), inset 0 1px 0 rgb(247 224 138 / 0.28), inset 0 0 0 1px rgb(247 224 138 / 0.1);
+}
+.nav-item {
+  font: inherit; font-size: 0.72rem; letter-spacing: 0.01em; color: #b9b19c;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.1rem;
+  min-height: var(--nav-height); padding: 0; border: 0; border-radius: 10rem; background: none; cursor: pointer;
+  transition: color 0.25s var(--ease);
+}
+.nav-icon { display: grid; place-items: center; width: 3.4rem; height: 1.85rem; border-radius: 10rem; transition: background-color 0.25s var(--ease), color 0.25s var(--ease), transform 0.25s var(--ease); }
+.nav-item[aria-current='page'] { color: var(--gold-bright); font-weight: 700; }
+.nav-item[aria-current='page'] .nav-icon { background: var(--gold-shine); color: var(--black); box-shadow: 0 6px 16px -6px rgb(212 175 55 / 0.9); }
+.nav-item:active .nav-icon { transform: scale(0.92); }
+.nav-item:focus-visible { outline-offset: -3px; }
+
+.card { background: var(--surface); border-radius: var(--round-l); padding: var(--pad); margin: 0.85rem 0; box-shadow: var(--lift); }
+
+.field { display: flex; flex-direction: column; gap: 0.3rem; margin: 0.7rem 0; min-width: 0; }
+.field label, legend { font-size: 0.82rem; font-weight: 600; letter-spacing: 0.01em; color: var(--muted); }
+input[type='text'], input[type='search'], select, textarea {
+  font: inherit; width: 100%; min-height: 3rem; padding: 0.5rem 0.9rem;
+  border: 1px solid var(--field-line); border-radius: var(--round-s); background: var(--surface); color: var(--ink);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+input::placeholder, textarea::placeholder { color: #8a8371; opacity: 1; }
+select {
+  -webkit-appearance: none; appearance: none; padding-right: 2.6rem; text-overflow: ellipsis;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a17c1b' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9.5l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 0.85rem center; background-size: 1.15rem;
+}
+textarea { resize: vertical; line-height: 1.4; }
+input[readonly] { background: var(--tint); color: var(--muted); }
+
+/* A group of fields is set apart by space and a warm wash, not by a frame. */
+fieldset { border: 0; padding: 0; margin: 0.9rem 0; min-width: 0; }
+/* Floated, the legend sits inside the group like a heading instead of cutting through its edge. */
+legend { float: left; width: 100%; padding: 0; margin-bottom: 0.4rem; }
+legend + * { clear: both; }
+.new-product, .product-photo { background: var(--tint); border-radius: var(--round-m); padding: 0.8rem 0.9rem; }
+
+:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+:is(input[type='text'], input[type='search'], select, textarea):focus-visible {
+  outline: 2px solid var(--gold-deep); outline-offset: 0; border-color: var(--gold-deep); box-shadow: 0 0 0 0.3rem rgb(212 175 55 / 0.28);
+}
+.app-bar :focus-visible, .bottom-nav :focus-visible, .camera :focus-visible { outline-color: var(--gold-bright); }
+
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 0.7rem; align-items: end; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 0.6rem; align-items: end; }
+
+.button-row { display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 0.85rem 0; }
+.button {
+  font: inherit; font-weight: 600; display: inline-flex; align-items: center; justify-content: center;
+  gap: 0.45rem; text-align: center;
+  min-height: 3rem; padding: 0.4rem 1.25rem; border-radius: 10rem; cursor: pointer;
+  border: 1px solid rgb(161 124 27 / 0.55); background: var(--surface); color: var(--ink);
+  box-shadow: 0 1px 2px rgb(54 40 8 / 0.06), 0 8px 18px -14px rgb(54 40 8 / 0.4);
+  transition: transform 0.18s var(--ease), box-shadow 0.18s var(--ease), opacity 0.18s;
+}
+.icon { flex: none; }
+.button.primary { background: var(--gold-shine); color: var(--black); border-color: transparent; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.6), var(--glow); }
+.button.quiet { border-color: transparent; background: rgb(54 40 8 / 0.06); box-shadow: none; font-weight: 500; }
+/* Small buttons are narrower, not shorter than a thumb can hit reliably. */
+.button.small { min-height: 2.75rem; padding: 0.2rem 0.9rem; font-size: 0.9rem; }
+.button.wide { width: 100%; }
+.button:active:not(:disabled) { transform: scale(0.97); }
+.button:disabled, .button.disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+label.button:focus-within { outline: 3px solid var(--ink); outline-offset: 2px; }
+
+/* The two ways to add a photo, as square cards a thumb cannot miss: one gold, one black. */
+.photo-cards { container-type: inline-size; display: grid; grid-template-columns: repeat(2, minmax(0, 13rem)); justify-content: center; gap: clamp(0.75rem, 3.6vw, 1rem); margin: 1.1rem 0; }
+.photo-card {
+  font: inherit; aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.25rem;
+  padding: 0.5rem; text-align: center; cursor: pointer; border: 0; border-radius: var(--round-l);
+  color: #fff; background: radial-gradient(120% 90% at 50% 0%, #2c2718, var(--black) 70%);
+  box-shadow: inset 0 1px 0 rgb(247 224 138 / 0.3), var(--lift-high);
+  transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+.photo-card strong { font-size: 1.05rem; }
+.photo-card small { font-size: 0.8rem; color: #cfc8b4; }
+.photo-card-icon { display: grid; place-items: center; width: 3.75rem; height: 3.75rem; border-radius: 50%; margin-bottom: 0.35rem; background: var(--gold-shine); color: var(--black); }
+.photo-card.primary { background: var(--gold-shine); color: var(--black); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.65), var(--glow); }
+.photo-card.primary small { color: #2c2410; }
+.photo-card.primary .photo-card-icon { background: var(--black); color: var(--gold-bright); }
+/* Where the pair has little room (inside a form on a small phone) the hint goes, so the cards stay square. */
+@container (max-width: 17rem) {
+  .photo-card small { display: none; }
+  .photo-card-icon { width: 2.9rem; height: 2.9rem; }
+}
+.photo-card:active { transform: scale(0.96); }
+.photo-card.disabled, .photo-card:disabled { opacity: 0.5; cursor: not-allowed; }
+.photo-card:focus-within { outline: 3px solid var(--ink); outline-offset: 2px; }
+
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+.hint { color: var(--muted); font-size: 0.9rem; }
+.warn { color: var(--warn); }
+.hint.warn { background: var(--warn-bg); padding: 0.55rem 0.85rem; border-radius: var(--round-s); }
+.error-text { color: var(--danger); }
+
+.notice { padding: 0.75rem 1rem; border-radius: var(--round-m); margin: 0.85rem 0; font-size: 0.95rem; }
+.notice.success { background: var(--ok-bg); color: var(--ok); }
+.notice.error { background: var(--danger-bg); color: var(--danger); }
+.notice.info { background: var(--info-bg); color: #4a3a00; }
+
+.problems { color: var(--danger); font-size: 0.9rem; margin: 0.5rem 0; padding-left: 1.1rem; list-style: disc; }
+
+/* Fold-away sections open with a chevron that turns, in place of the browser's triangle. */
+summary { list-style: none; display: flex; align-items: center; gap: 0.5rem; min-height: 3rem; font-weight: 600; cursor: pointer; border-radius: var(--round-s); }
+summary::-webkit-details-marker { display: none; }
+summary::after {
+  content: ''; flex: none; width: 0.55rem; height: 0.55rem; margin: 0 0.3rem 0.2rem auto;
+  border-right: 2px solid var(--gold-deep); border-bottom: 2px solid var(--gold-deep); transform: rotate(45deg); transition: transform 0.25s var(--ease);
+}
+details[open] > summary::after { transform: translateY(0.25rem) rotate(-135deg); }
+.tips { background: rgb(212 175 55 / 0.13); border-radius: var(--round-m); padding: 0 1rem; margin: 0.85rem 0; }
+.tips ul { list-style: disc; padding: 0 0 0.9rem 1.1rem; color: #4d4737; font-size: 0.9rem; display: grid; gap: 0.3rem; }
+.disclosure { border-top: 1px solid var(--hairline); margin-top: 0.6rem; }
+.disclosure[open] { padding-bottom: 0.3rem; }
+.count-chip { font-size: 0.75rem; font-weight: 600; color: var(--muted); background: rgb(54 40 8 / 0.07); border-radius: 10rem; padding: 0.1rem 0.6rem; }
+
+.photo-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: 0.75rem; margin: 0.75rem 0; }
+.photo { background: var(--surface); border-radius: var(--round-m); padding: 0.45rem; box-shadow: var(--lift); }
+.photo img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 0.8rem; display: block; }
+.photo-status { font-size: 0.85rem; color: var(--muted); min-height: 1.2rem; padding-inline: 0.25rem; }
+.photo .button-row { margin: 0.2rem 0 0; }
+
+.row-list { display: grid; gap: 0.85rem; }
+.row-list .card { margin: 0; }
+/* Confidence shows as a slim rounded bar down the card's inner edge. */
+.row-card { position: relative; padding-left: calc(var(--pad) + 0.55rem); }
+.row-card::before { content: ''; position: absolute; left: 0.6rem; top: 1.25rem; bottom: 1.25rem; width: 0.28rem; border-radius: 1rem; background: var(--hairline); }
+.row-card.confidence-low::before { background: var(--danger); }
+.row-card.confidence-medium::before { background: #c77700; }
+.row-card.confidence-high::before { background: var(--ok); }
+.row-head { display: flex; align-items: center; gap: 0.7rem; }
+.row-title { flex: 1; display: flex; flex-direction: column; gap: 0.15rem; align-items: flex-start; }
+.row-title small { color: var(--muted); font-size: 0.8rem; }
+.row-note { font-size: 0.9rem; color: var(--muted); font-style: italic; }
+.row-foot { display: grid; grid-template-columns: 1fr minmax(7.5rem, 42%); gap: 0.7rem; align-items: end; }
+.total { font-size: 1rem; margin-bottom: 0.7rem; }
+.total strong { font-size: 1.5rem; font-variant-numeric: tabular-nums; }
+.total small { display: block; color: var(--muted); }
+.chosen-product { font-size: 0.85rem; color: var(--muted); margin: 0; }
+
+.thumb { width: 3.4rem; height: 3.4rem; border-radius: 0.95rem; object-fit: cover; flex: none; background: var(--tint); }
+.thumb.placeholder { display: inline-flex; align-items: center; justify-content: center; color: var(--gold-deep); font-size: 1.2rem; }
+
+.badge { display: inline-block; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; padding: 0.12rem 0.6rem; border-radius: 10rem; }
+.badge.high { background: var(--ok-bg); color: var(--ok); }
+.badge.medium { background: var(--warn-bg); color: var(--warn); }
+.badge.low { background: var(--danger-bg); color: var(--danger); }
+.badge.reorder { background: var(--warn-bg); color: var(--warn); }
+
+/* Floats just above the navigation, so saving is always one thumb-reach away. */
+.save-bar {
+  position: sticky; bottom: calc(var(--dock-top) + 0.5rem); z-index: 2; margin: 0.85rem 0; padding: 0.5rem;
+  background: rgb(255 255 255 / 0.9); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  border-radius: 2rem; box-shadow: var(--lift-high);
+}
+.save-bar .problems { margin: 0.2rem 0.6rem 0.5rem; }
+
+/* Each choice is a soft row; the chosen one is ringed in gold. */
+.choices { display: grid; gap: 0.5rem; }
+.choice { display: flex; gap: 0.7rem; align-items: flex-start; padding: 0.7rem 0.85rem; border-radius: var(--round-m); background: var(--tint); cursor: pointer; transition: background-color 0.2s, box-shadow 0.2s; }
+.choice:has(input:checked) { background: var(--info-bg); box-shadow: inset 0 0 0 1.5px var(--gold-deep); }
+.choice input { width: 1.25rem; height: 1.25rem; margin-top: 0.15rem; flex: none; accent-color: var(--gold-deep); }
+.choice span { display: flex; flex-direction: column; }
+.choice small { color: var(--muted); }
+
+.product-list { display: grid; gap: 0.7rem; margin-top: 0.85rem; }
+.product-item {
+  font: inherit; width: 100%; display: flex; gap: 0.8rem; align-items: center; text-align: left; min-height: 4.4rem; padding: 0.5rem 0.9rem 0.5rem 0.5rem;
+  background: var(--surface); color: var(--ink); border: 0; border-radius: 1.3rem; box-shadow: var(--lift); cursor: pointer;
+  transition: transform 0.18s var(--ease);
+}
+.product-item::after { content: ''; flex: none; width: 0.5rem; height: 0.5rem; margin-left: auto; border-top: 2px solid var(--gold-deep); border-right: 2px solid var(--gold-deep); transform: rotate(45deg); }
+.product-item:active { transform: scale(0.98); }
+.product-text { display: flex; flex-direction: column; min-width: 0; }
+.product-text small { color: var(--muted); }
+.product-text small.warn { color: var(--warn); }
+.product-image { display: block; width: 100%; max-width: 10rem; margin-inline: auto; aspect-ratio: 1; object-fit: cover; border-radius: var(--round-m); background: var(--surface); box-shadow: var(--lift); }
+p.product-image.placeholder { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 0.9rem; }
+
+.heading-row { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
+.heading-row h2 { min-width: 0; }
+/* The button beside a title keeps its word whole; the title is what wraps. */
+.heading-row .button { flex: none; white-space: nowrap; }
+.stock-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: 0.85rem; margin-top: 0.85rem; }
+.stock-card { margin: 0; }
+.stock-card.needs-check { background: var(--danger-bg); box-shadow: inset 0 0 0 1.5px #f3c0ba, var(--lift); }
+.stock-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.75rem; }
+.stock-name { font-weight: 600; }
+.stock-total { margin: 0; white-space: nowrap; text-align: right; line-height: 1.1; }
+.stock-total strong { font-size: 1.7rem; font-variant-numeric: tabular-nums; }
+.stock-total small { color: var(--muted); }
+/* The places sit side by side, parted by a hairline. */
+.stock-places { display: grid; grid-template-columns: repeat(3, 1fr); margin: 0.85rem 0 0; padding-top: 0.75rem; border-top: 1px solid var(--hairline); }
+.stock-places > div { padding-inline: 0.6rem; border-left: 1px solid var(--hairline); }
+.stock-places > div:nth-child(3n + 1) { padding-left: 0; border-left: 0; }
+.stock-places dt { font-size: 0.78rem; color: var(--muted); }
+.stock-places dd { margin: 0; font-size: 1.1rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stock-flags { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin: 0.7rem 0 0; }
+
+.waiting-saves { margin: 0.4rem 0; display: grid; gap: 0.3rem; font-size: 0.9rem; }
+.waiting-saves li { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; justify-content: space-between; }
+
+/* The on/off choice for saving counts unattended: a sliding switch, black and gold when on. */
+.switch { display: flex; gap: 0.85rem; align-items: center; padding: 0.85rem 1rem; margin: 0.85rem 0; background: var(--surface); border-radius: var(--round-m); box-shadow: var(--lift); cursor: pointer; }
+.switch span { flex: 1; display: flex; flex-direction: column; }
+.switch small { color: var(--muted); line-height: 1.35; }
+.switch input {
+  -webkit-appearance: none; appearance: none; order: 2; flex: none; position: relative; margin: 0; width: 3.1rem; height: 1.85rem;
+  border-radius: 10rem; background: var(--field-line); cursor: pointer; transition: background-color 0.25s var(--ease);
+}
+.switch input::before {
+  content: ''; position: absolute; top: 0.2rem; left: 0.2rem; width: 1.45rem; height: 1.45rem; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / 0.35); transition: transform 0.25s var(--ease);
+}
+.switch input:checked { background: var(--black); }
+.switch input:checked::before { transform: translateX(1.25rem); background: var(--gold-shine); }
+
+.progress { font-size: 0.9rem; font-weight: 600; min-height: 1.3rem; margin: 0.5rem 0; }
+
+.saved-list { background: var(--surface); border-radius: var(--round-m); box-shadow: var(--lift); margin: 0.6rem 0; }
+.saved-list li { display: flex; align-items: center; gap: 0.6rem; padding: 0.7rem 1rem; border-bottom: 1px solid var(--hairline); }
+.saved-list li:last-child { border-bottom: 0; }
+.saved-name { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.saved-name small { color: var(--muted); font-size: 0.8rem; }
+.saved-pieces { font-size: 1.25rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* The in-app camera covers the whole screen, bars included, and stays open between shots. */
+.camera { position: fixed; inset: 0; z-index: 10; background: #000; color: #fff; display: flex; flex-direction: column; justify-content: space-between; }
+.camera-view { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.camera-flash { position: absolute; inset: 0; background: #fff; opacity: 0.7; }
+.camera-top, .camera-bottom { position: relative; display: flex; align-items: center; gap: 0.75rem; }
+.camera-top { justify-content: space-between; padding: calc(0.7rem + env(safe-area-inset-top)) max(var(--gutter), env(safe-area-inset-right)) 2rem max(var(--gutter), env(safe-area-inset-left)); background: linear-gradient(to bottom, rgb(0 0 0 / 0.7), transparent); }
+.camera-bottom { flex-direction: column; padding: 2.5rem max(var(--gutter), env(safe-area-inset-right)) calc(1.1rem + env(safe-area-inset-bottom)) max(var(--gutter), env(safe-area-inset-left)); background: linear-gradient(to top, rgb(0 0 0 / 0.8), transparent); }
+.camera-place { margin: 0; font-weight: 600; color: var(--gold-bright); }
+.camera-progress { margin: 0; text-align: center; font-size: 0.9rem; min-height: 1.3rem; }
+.camera-close { font: inherit; font-weight: 600; display: inline-flex; align-items: center; gap: 0.35rem; min-height: 2.75rem; padding: 0 1rem; color: #fff; background: rgb(255 255 255 / 0.16); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); border: 1px solid rgb(255 255 255 / 0.4); border-radius: 10rem; cursor: pointer; }
+.camera-shutter { width: 4.75rem; height: 4.75rem; border-radius: 50%; cursor: pointer; background: var(--gold-shine); border: 0.3rem solid #fff; box-shadow: 0 0 0 0.15rem rgb(0 0 0 / 0.5), 0 0 28px rgb(212 175 55 / 0.5); transition: transform 0.15s var(--ease); }
+.camera-shutter:active { transform: scale(0.92); }
+.camera-shutter:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Movement: a screen eases in when its tab is chosen, and new cards rise into place.
+   The fill is backwards only, so nothing stays transformed once it has settled. */
+@keyframes screen-in { from { opacity: 0; transform: translateY(0.6rem); } }
+@keyframes rise { from { opacity: 0; transform: translateY(0.5rem) scale(0.98); } }
+main > div:not([hidden]) > section, main > section { animation: screen-in 0.36s var(--ease) backwards; }
+.row-card, .photo, .saved-list li, .notice, .stock-card, .product-item { animation: rise 0.32s var(--ease) backwards; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* Phones: buttons in a row share its width, so each is a full-size target that never overflows. */
+@media (max-width: 30rem) {
+  .button-row .button { flex: 1 1 8rem; padding-inline: 0.6rem; }
+}
+
+/* Very narrow phones: two inputs side by side would be too tight to read a barcode or a date. */
+@media (max-width: 21rem) {
+  .grid-2 { grid-template-columns: 1fr; }
+}
+
+/* A phone held sideways has little height: only the navigation stays pinned. */
+@media (max-height: 30rem) {
+  .app-bar, .save-bar { position: static; }
+}

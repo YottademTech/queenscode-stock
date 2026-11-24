@@ -1,0 +1,80 @@
+import { z } from 'zod';
+import {
+  bootstrapSchema,
+  countAnalysisSchema,
+  labelReadingSchema,
+  saveResultSchema,
+  stockSchema,
+  type AdjustmentInput,
+  type EncodedImage,
+  type SaveCountsInput,
+  type SaveProductInput,
+} from './contract';
+
+/**
+ * `network` and `service_unavailable` are raised by this adapter; every other code comes from
+ * the backend (unauthorized, invalid_request, sheet_full, busy, claude_unavailable, ...).
+ */
+export type ApiError = { code: string; message: string };
+export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: ApiError };
+
+const API_URL: string = import.meta.env.VITE_API_URL ?? '';
+const APP_SECRET: string = import.meta.env.VITE_APP_SECRET ?? '';
+
+export const isConfigured = API_URL !== '' && APP_SECRET !== '';
+
+const replySchema = z.union([
+  z.object({ ok: z.literal(true), data: z.unknown() }),
+  z.object({ ok: z.literal(false), error: z.object({ code: z.string(), message: z.string() }) }),
+]);
+
+const QUICK_TIMEOUT_MS = 45_000;
+// Reading a photo can take Claude well over half a minute, plus the upload on a slow connection.
+const PHOTO_TIMEOUT_MS = 150_000;
+
+const unavailable: ApiError = {
+  code: 'service_unavailable',
+  message: 'The server sent a reply the app could not read. Check the Apps Script deployment and its access setting.',
+};
+
+async function call<T>(action: string, payload: object, dataSchema: z.ZodType<T>, timeoutMs: number): Promise<ApiResult<T>> {
+  let replyText: string;
+  // fetch and timeouts throw; this is the one place those become explicit failures.
+  try {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      // text/plain keeps this a "simple" request: Apps Script cannot answer a CORS preflight.
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ ...payload, action, secret: APP_SECRET }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    replyText = await response.text();
+  } catch {
+    return { ok: false, error: { code: 'network', message: 'No connection to the server. Check your signal and try again.' } };
+  }
+
+  let replyJson: unknown;
+  try {
+    replyJson = JSON.parse(replyText);
+  } catch {
+    return { ok: false, error: unavailable };
+  }
+
+  const reply = replySchema.safeParse(replyJson);
+  if (!reply.success) return { ok: false, error: unavailable };
+  if (!reply.data.ok) return { ok: false, error: reply.data.error };
+
+  const data = dataSchema.safeParse(reply.data.data);
+  return data.success ? { ok: true, data: data.data } : { ok: false, error: unavailable };
+}
+
+export const api = {
+  bootstrap: () => call('bootstrap', {}, bootstrapSchema, QUICK_TIMEOUT_MS),
+  stock: () => call('stock', {}, stockSchema, QUICK_TIMEOUT_MS),
+  analyzeCount: (location: string, image: EncodedImage) =>
+    call('analyzeCount', { location, image }, countAnalysisSchema, PHOTO_TIMEOUT_MS),
+  readProductLabel: (image: EncodedImage) => call('readProductLabel', { image }, labelReadingSchema, PHOTO_TIMEOUT_MS),
+  saveCounts: (input: SaveCountsInput) => call('saveCounts', input, saveResultSchema, QUICK_TIMEOUT_MS),
+  saveAdjustment: (input: AdjustmentInput) => call('adjust', input, saveResultSchema, QUICK_TIMEOUT_MS),
+  saveProduct: (input: SaveProductInput) => call('saveProduct', input, saveResultSchema, PHOTO_TIMEOUT_MS),
+};

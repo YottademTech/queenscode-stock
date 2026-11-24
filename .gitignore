@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.DS_Store
+
+# Raw shop photos sent for reference: business records, not part of the app.
+WhatsApp Image*
