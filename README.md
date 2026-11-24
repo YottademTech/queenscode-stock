@@ -31,6 +31,11 @@ one counted, and up to three more (the front and back of one item, a marking on 
 for details. The whole set goes to Claude as one request, so one request returns the count and the
 details. In the camera, tap **Next** to move to the next product; with Upload, tap **Count this set**.
 
+The option is off until someone switches it on, and each phone remembers its own choice. The camera
+shows the same choice as **One by one** or **Stock, front, back**, so it can be seen and changed
+where the photos are taken. With it off, every photo is counted on its own: a close-up of a back
+label sent that way comes back as a separate product with one piece.
+
 - Claude counts from the first photo only, and still counts products no close-up shows.
 - A new product is created with every detail read from the set.
 - For a product already in the Sheet, the details fill only the cells that are empty. Nothing a

@@ -379,6 +379,11 @@ p.product-image.placeholder { display: flex; align-items: center; justify-conten
 .camera-place { margin: 0; font-weight: 600; color: var(--gold-bright); }
 .camera-progress { margin: 0; text-align: center; font-size: 0.9rem; min-height: 1.3rem; }
 .camera-status { margin: 0; text-align: center; font-size: 0.8rem; color: #cfc8b4; min-height: 1.1rem; }
+/* The choice between every photo counted on its own and a product's stock, front and back, made where the photos are taken. */
+.camera-mode { display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem; width: 100%; max-width: 22rem; min-width: 0; margin: 0; padding: 0.25rem; border: 0; border-radius: 10rem; background: rgb(255 255 255 / 0.16); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.camera-mode label { position: relative; display: flex; align-items: center; justify-content: center; min-height: 2.75rem; padding: 0 0.35rem; border-radius: 10rem; font-size: clamp(0.8rem, 3.9vw, 0.9rem); font-weight: 600; white-space: nowrap; cursor: pointer; }
+.camera-mode label:has(input:checked) { color: var(--black); background: var(--gold-shine); }
+.camera-mode label:has(input:focus-visible) { outline: 2px solid #fff; outline-offset: 2px; }
 /* The shutter stays in the middle; "Next" sits to its right when photo sets are on. */
 .camera-controls { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 0.75rem; width: 100%; }
 .camera-shutter { grid-column: 2; }

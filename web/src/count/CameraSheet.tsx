@@ -10,10 +10,12 @@ type CameraSheetProps = {
   /** What is happening to the shots already taken, for example "2 being counted, 5 saved". */
   progress: string;
   /**
-   * Given while photo sets are on: how many photos the open set holds, how many it can hold, and
-   * what to do when the counter moves to the next product.
+   * Given when the server can read photo sets. `on` is the counter's choice between every photo
+   * counted on its own and sets (a product's stock, then its front and back), and can be changed
+   * here, where the photos are taken. The rest describes the open set: how many photos it holds,
+   * how many it can hold, and what to do when the counter moves to the next product.
    */
-  set?: { taken: number; limit: number; onNext: () => void };
+  sets?: { on: boolean; onChange: (on: boolean) => void; taken: number; limit: number; onNext: () => void };
   onShot: (photo: PreparedPhoto) => void;
   onClose: () => void;
 };
@@ -25,7 +27,8 @@ export const canUseCamera = typeof navigator !== 'undefined' && window.isSecureC
  * A full-screen camera that stays open between shots: tap, move to the next shelf, tap again.
  * Each shot is handed straight to the caller, which counts it in the background.
  */
-export function CameraSheet({ location, progress, set, onShot, onClose }: CameraSheetProps) {
+export function CameraSheet({ location, progress, sets, onShot, onClose }: CameraSheetProps) {
+  const set = sets?.on ? sets : undefined;
   const videoRef = useRef<HTMLVideoElement>(null);
   const shutterRef = useRef<HTMLButtonElement>(null);
   const [camera, setCamera] = useState<CameraState>({ kind: 'starting' });
@@ -86,7 +89,9 @@ export function CameraSheet({ location, progress, set, onShot, onClose }: Camera
 
   const setIsFull = set !== undefined && set.taken >= set.limit;
   const guidance = !set
-    ? shots === 0 ? 'Tap to take a photo. Keep going: counting happens in the background.' : `${shots} taken. ${progress}`
+    ? shots > 0 ? `${shots} taken. ${progress}`
+      : sets ? 'Every photo is counted on its own. Keep going: counting happens in the background.'
+        : 'Tap to take a photo. Keep going: counting happens in the background.'
     : set.taken === 0
       ? 'Photo 1: the stock to count.'
       : setIsFull
@@ -107,6 +112,19 @@ export function CameraSheet({ location, progress, set, onShot, onClose }: Camera
       </div>
 
       <div className="camera-bottom">
+        {sets && (
+          <fieldset className="camera-mode">
+            <legend className="visually-hidden">How the photos are used</legend>
+            <label>
+              <input type="radio" name="camera-mode" className="visually-hidden" checked={!sets.on} onChange={() => sets.onChange(false)} />
+              One by one
+            </label>
+            <label>
+              <input type="radio" name="camera-mode" className="visually-hidden" checked={sets.on} onChange={() => sets.onChange(true)} />
+              Stock, front, back
+            </label>
+          </fieldset>
+        )}
         <p className="camera-progress" role="status" aria-live="polite">
           {camera.kind === 'starting' && 'Opening the camera…'}
           {camera.kind === 'failed' && camera.message}

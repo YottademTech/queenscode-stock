@@ -185,6 +185,9 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
     }
     if (unreadable > 0) {
       setNotice({ tone: 'error', text: `${plural(unreadable, 'file', 'files')} could not be opened as a photo.` });
+    } else if (!usingSets && files.length > 1 && files.length <= setLimit) {
+      // The same photos would have made one set, so say which way they went.
+      setNotice({ tone: 'info', text: `These ${files.length} photos are each counted on their own. For one product's stock, front and back, switch on "Add front and back photos" first.` });
     }
   };
 
@@ -410,7 +413,7 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
         <CameraSheet
           location={location}
           progress={progress}
-          set={usingSets ? { taken: openSetSize, limit: setLimit, onNext: closeOpenSet } : undefined}
+          sets={setLimit > 1 ? { on: photoSets, onChange: handlePhotoSetsChange, taken: openSetSize, limit: setLimit, onNext: closeOpenSet } : undefined}
           onShot={addPhoto}
           onClose={handleCameraClose}
         />
