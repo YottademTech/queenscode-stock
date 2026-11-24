@@ -24,7 +24,7 @@ function countSave(id: string): QueuedSave {
       requestId: id,
       location: 'Shop shelf',
       counter: 'Ama',
-      rows: [{ productCode: 'RG-YEL', newProduct: null, fullCartons: 0, packSize: null, loosePieces: 8, confidence: 'High', note: '' }],
+      rows: [{ productCode: 'RG-YEL', newProduct: null, details: null, fullCartons: 0, packSize: null, loosePieces: 8, confidence: 'High', note: '' }],
     },
   };
 }

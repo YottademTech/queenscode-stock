@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 import type { CountAnalysis, Product } from '../api/contract';
 import { emptyDetails } from '../products/details';
 import {
-  canSaveUnattended, countReducer, emptyCount, groupByLocation, rowProblems, rowsFromAnalysis, rowsPerProduct, savedCount,
-  toCountRowInput, totalPieces, type CountRow, type CountState, type Photo,
+  canSaveUnattended, countReducer, detailsToFill, emptyCount, groupByLocation, photoCount, rowProblems, rowsFromAnalysis, rowsPerProduct,
+  savedCount, toCountRowInput, totalPieces, type CountRow, type CountState, type Photo,
 } from './countState';
 
 const photo = (id: string, location = 'Warehouse sacks'): Photo => ({
-  id, previewUrl: 'data:', image: { data: 'AAAA', mediaType: 'image/jpeg' }, location, failures: 0, status: { kind: 'waiting' },
+  id, previewUrl: `data:${id}`, image: { data: id, mediaType: 'image/jpeg' }, details: [], location, failures: 0, status: { kind: 'waiting' },
 });
 
 const product = (overrides: Partial<Product> = {}): Product => ({
@@ -99,7 +99,8 @@ describe('counting from photos', () => {
 
   it('sends new-product details only for products that are not in the list', () => {
     const [listed, unlisted] = reviewed().rows.map(toCountRowInput);
-    expect(listed).toMatchObject({ productCode: 'RG-YEL', newProduct: null, fullCartons: 2, loosePieces: 3 });
+    expect(listed).toMatchObject({ productCode: 'RG-YEL', newProduct: null, details: null, fullCartons: 2, loosePieces: 3 });
+    expect(unlisted?.details).toBeNull();
     // Every detail Claude read travels with the row, not only the ones shown first.
     expect(unlisted?.newProduct).toEqual({ ...emptyDetails(), name: 'QBH Carrot Oil', size: '100ml', category: 'Hair oil', expiry: '2030-08', brand: 'QBH', labelText: 'QBH\nCARROT OIL' });
   });
@@ -155,6 +156,47 @@ describe('saving without the counter waiting', () => {
     expect(state.rows).toEqual([]);
     expect(state.photos).toEqual([]);
     expect(state.saved.map((item) => item.id)).toEqual(['r2', 'r1']);
+  });
+
+  it('groups photos taken with photo sets on into one set: the first is counted, the rest are details', () => {
+    const take = (state: CountState, id: string) => countReducer(state, { type: 'setPhotoAdded', photo: photo(id), limit: 3 });
+
+    let state = take(take(take(emptyCount, 'shelf'), 'front'), 'back');
+    expect(state.photos).toHaveLength(1);
+    expect(state.photos[0]).toMatchObject({ id: 'shelf', status: { kind: 'collecting' } });
+    expect(state.photos[0]?.details.map((detail) => detail.image.data)).toEqual(['front', 'back']);
+    expect(photoCount(state.photos[0]!)).toBe(3);
+
+    // A full set takes no more, and does not quietly start another one.
+    expect(take(state, 'extra')).toBe(state);
+
+    state = countReducer(state, { type: 'detailPhotoRemoved', photoId: 'shelf', index: 0 });
+    expect(state.photos[0]?.details.map((detail) => detail.image.data)).toEqual(['back']);
+
+    // Closing the set hands it to Claude; the next photo then starts a new set.
+    state = countReducer(state, { type: 'openSetClosed' });
+    expect(state.photos[0]?.status).toEqual({ kind: 'waiting' });
+    state = take(state, 'next-shelf');
+    expect(state.photos.map((item) => [item.id, item.status.kind, item.details.length])).toEqual([['shelf', 'waiting', 1], ['next-shelf', 'collecting', 0]]);
+  });
+
+  it('sends what was read from the photos for a listed product, to fill what the Sheet lacks', () => {
+    const read = { ...emptyDetails(), name: 'RICH GLOW yellow', brand: ' Rich Glow ', ingredients: 'Aqua, Glycerin', expiry: '2030-08' };
+    const row: CountRow = { ...reviewed().rows[0]!, confidence: 'Medium', newProduct: read };
+    const listed = product({ expiry: '2029-01' });
+
+    // Only what the Sheet does not have yet, and never the name.
+    expect(detailsToFill(row, listed)).toEqual(['brand', 'ingredients']);
+    expect(toCountRowInput(row).details).toEqual({ ...read, brand: 'Rich Glow' });
+
+    // Claude may have the wrong product when it reports Low, so nothing is promised then.
+    expect(detailsToFill({ ...row, confidence: 'Low' }, listed)).toEqual([]);
+    expect(detailsToFill(row, null)).toEqual([]);
+
+    // Details the server would refuse are left out, so they cannot block the count itself.
+    const malformed = { ...row, newProduct: { ...read, barcode: '12a' } };
+    expect(toCountRowInput(malformed).details).toBeNull();
+    expect(detailsToFill(malformed, listed)).toEqual([]);
   });
 
   it('keeps a photo with nothing countable on screen, so its note is seen', () => {

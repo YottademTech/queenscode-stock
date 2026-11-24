@@ -24,6 +24,20 @@ Each row also has a **QR code** column for what a QR code on the pack holds. Cla
 for it, because a photo cannot be relied on to decode one: staff type, paste or scan it in. Like
 the barcode, it is optional.
 
+## Front and back photos
+
+On the Photo screen, **Add front and back photos** groups photos into a set: the first photo is the
+one counted, and up to three more (the front and back of one item, a marking on a sack) are read
+for details. The whole set goes to Claude as one request, so one request returns the count and the
+details. In the camera, tap **Next** to move to the next product; with Upload, tap **Count this set**.
+
+- Claude counts from the first photo only, and still counts products no close-up shows.
+- A new product is created with every detail read from the set.
+- For a product already in the Sheet, the details fill only the cells that are empty. Nothing a
+  person entered is replaced, the name is never changed, and a Low-confidence row fills nothing.
+
+The option appears only when the deployed Apps Script supports it.
+
 ## Where stock is kept
 
 Places come from the Sheet's Settings tab (B4:B6). The word in the name decides how a place is
@@ -54,7 +68,7 @@ in its Script Properties, which is Google's equivalent.
 ```
 cd web
 npm install
-npm run backend    # terminal 1: local stand-in for the Sheet, on port 8787
+npm run backend    # terminal 1: local stand-in for the Sheet, on port 8790
 npm run dev        # terminal 2: the app, on http://localhost:5173
 ```
 

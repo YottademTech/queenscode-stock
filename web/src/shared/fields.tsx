@@ -78,6 +78,21 @@ export function SelectField({ label, value, options, onChange }: SelectFieldProp
   );
 }
 
+type SwitchFieldProps = { label: string; hint: string; checked: boolean; onChange: (checked: boolean) => void };
+
+/** An on/off choice. A native checkbox underneath, announced as a switch. */
+export function SwitchField({ label, hint, checked, onChange }: SwitchFieldProps) {
+  return (
+    <label className="switch">
+      <input type="checkbox" role="switch" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <span>
+        <strong>{label}</strong>
+        <small>{hint}</small>
+      </span>
+    </label>
+  );
+}
+
 const NEW_PRODUCT = '__new__';
 
 type ProductPickerProps = {

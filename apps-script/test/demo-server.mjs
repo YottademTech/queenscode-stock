@@ -10,7 +10,7 @@ import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { claudeAnswer, loadBackend } from './fakes.mjs';
 
-const PORT = 8787;
+const PORT = 8790;
 
 try {
   process.loadEnvFile(fileURLToPath(new URL('../../.env', import.meta.url)));
@@ -30,10 +30,15 @@ function cannedClaudeReply(request) {
     return claudeAnswer({ name: 'QBH Rose Water Toner', size: '200ml', category: 'Toner', expiry: '2028-10', brand: 'QBH', variant: 'Rose water', countryOfOrigin: 'Ghana', otherDetails: [{ label: 'Claim', value: 'Alcohol free' }], labelText: 'QBH\nROSE WATER TONER\n200ml', note: 'Demo answer: Claude was not called.' });
   }
   const blank = { name: '', size: '', category: '', barcode: '', expiry: '' };
+  const photos = request.messages[0].content.filter((block) => block.type === 'image').length;
+  // With detail photos, the listed product comes back with details read off the close-ups.
+  const listed = photos === 1
+    ? { ...blank, productCode: 'RG-BLK-500', fullCartons: 0, packSize: 0, loosePieces: 11, confidence: 'Low', note: 'Back row hidden; 10 to 12.' }
+    : { ...blank, productCode: 'RG-BLK-500', category: 'Body lotion', brand: 'Rich Glow', batchNumber: 'L2291', expiry: '2029-03', ingredients: 'Aqua, Glycerin, Niacinamide', labelText: 'RICH GLOW\nADVANCED WHITENING LOTION', fullCartons: 0, packSize: 0, loosePieces: 11, confidence: 'Medium', note: 'Details read from the close-ups.' };
   return claudeAnswer({
-    photoNote: 'Demo answer: Claude was not called.',
+    photoNote: photos === 1 ? 'Demo answer: Claude was not called.' : `Demo answer for a set of ${photos} photos: Claude was not called.`,
     items: [
-      { ...blank, productCode: 'RG-BLK-500', fullCartons: 0, packSize: 0, loosePieces: 11, confidence: 'Low', note: 'Back row hidden; 10 to 12.' },
+      listed,
       { productCode: 'unknown', name: 'QBH Carrot Oil', size: '100ml', category: 'Hair oil', expiry: '2030-08-06', brand: 'QBH', variant: 'Carrot', labelText: 'QBH\nCARROT OIL\n100ml', fullCartons: 2, packSize: 24, loosePieces: 3, confidence: 'Medium', note: 'Two closed cartons marked 24 x 100ml.' },
     ],
   });

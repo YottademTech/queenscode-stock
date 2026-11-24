@@ -39,6 +39,9 @@ export const bootstrapSchema = z.object({
   adjustmentTypes: z.object({ correct: z.string(), add: z.string(), remove: z.string() }),
   products: z.array(productSchema),
   counted: z.array(z.object({ code: z.string(), location: z.string(), pieces: z.number() })),
+  // How many photos one count request may hold: the count photo plus detail photos. An Apps Script
+  // from before photo sets does not say, and reads one photo.
+  photoSetLimit: z.number().int().min(1).default(1),
 });
 export type Bootstrap = z.infer<typeof bootstrapSchema>;
 
@@ -102,6 +105,8 @@ export const saveCountsInputSchema = z.object({
     z.object({
       productCode: z.string().nullable(),
       newProduct: productDetailsSchema.nullable(),
+      // Details read from the photos of a listed product. Saves kept on a phone from before this existed have none.
+      details: productDetailsSchema.nullable().default(null),
       fullCartons: z.number(),
       packSize: z.number().nullable(),
       loosePieces: z.number(),

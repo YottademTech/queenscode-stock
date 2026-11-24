@@ -1,8 +1,11 @@
-import type { Confidence, CountAnalysis, CountRowInput, EncodedImage, Product, ProductDetails } from '../api/contract';
+import { DETAIL_KEYS, type Confidence, type CountAnalysis, type CountRowInput, type DetailKey, type EncodedImage, type Product, type ProductDetails } from '../api/contract';
+import type { PreparedPhoto } from '../lib/image';
 import { detailProblems, emptyDetails, pickDetails, trimDetails } from '../products/details';
 import type { Container } from './containers';
 
 export type PhotoStatus =
+  /** An open photo set: the counter is still adding detail photos, so it is not sent to Claude yet. */
+  | { kind: 'collecting' }
   | { kind: 'waiting' }
   | { kind: 'reading' }
   | { kind: 'done'; note: string }
@@ -13,6 +16,8 @@ export type Photo = {
   id: string;
   previewUrl: string;
   image: EncodedImage;
+  /** Close-ups of the same stock (front, back, markings). Claude reads them with the photo, in one request, and counts only the photo. */
+  details: readonly PreparedPhoto[];
   /** The place chosen when the photo was taken. It stays with the photo when the counter moves on. */
   location: string;
   /** How many times Claude has been asked to read it and failed. */
@@ -27,6 +32,7 @@ export type CountRow = {
   location: string;
   /** null means a product that is not in the Sheet yet; `newProduct` then describes it. */
   productCode: string | null;
+  /** What was read from the photos. For a listed product it fills the details the Sheet does not have yet. */
   newProduct: ProductDetails;
   fullCartons: number;
   packSize: number | null;
@@ -47,6 +53,10 @@ export type RowDetails = Pick<CountRow, 'productCode' | 'newProduct' | 'confiden
 
 export type CountAction =
   | { type: 'photoAdded'; photo: Photo }
+  /** A photo taken while photo sets are on: it starts a set, or joins the open one as a detail photo. */
+  | { type: 'setPhotoAdded'; photo: Photo; limit: number }
+  | { type: 'detailPhotoRemoved'; photoId: string; index: number }
+  | { type: 'openSetClosed' }
   | { type: 'readingStarted'; photoId: string }
   | { type: 'readingSucceeded'; photoId: string; note: string; rows: readonly CountRow[] }
   | { type: 'readingFailed'; photoId: string; message: string; retryable: boolean }
@@ -68,6 +78,21 @@ export function countReducer(state: CountState, action: CountAction): CountState
   switch (action.type) {
     case 'photoAdded':
       return { ...state, photos: [...state.photos, action.photo] };
+
+    case 'setPhotoAdded': {
+      const open = state.photos.find((photo) => photo.status.kind === 'collecting');
+      if (!open) return { ...state, photos: [...state.photos, { ...action.photo, details: [], status: { kind: 'collecting' } }] };
+      // The screen stops the counter before a set is full; a shot that slips past is not counted as a new set.
+      if (1 + open.details.length >= action.limit) return state;
+      const detail = { image: action.photo.image, previewUrl: action.photo.previewUrl };
+      return withPhoto(state, open.id, (photo) => ({ ...photo, details: [...photo.details, detail] }));
+    }
+
+    case 'detailPhotoRemoved':
+      return withPhoto(state, action.photoId, (photo) => ({ ...photo, details: photo.details.filter((_, index) => index !== action.index) }));
+
+    case 'openSetClosed':
+      return { ...state, photos: state.photos.map((photo) => (photo.status.kind === 'collecting' ? { ...photo, status: { kind: 'waiting' } } : photo)) };
 
     case 'readingStarted':
       return withPhoto(state, action.photoId, (photo) => ({ ...photo, status: { kind: 'reading' } }));
@@ -213,11 +238,35 @@ export function savedCount(row: CountRow, products: readonly Product[], waitingF
   };
 }
 
+/** How many photos this entry sends to Claude: the count photo plus its detail photos. */
+export function photoCount(photo: Photo): number {
+  return 1 + photo.details.length;
+}
+
+/**
+ * The details of a listed product that saving this row will fill in: those read from the photos
+ * that the Sheet does not have yet. The server applies the same rule, and it is the one that
+ * decides. A Low-confidence row fills nothing, because Claude may have the wrong product.
+ */
+export function detailsToFill(row: CountRow, product: Product | null): DetailKey[] {
+  if (!product || row.confidence === 'Low' || readDetails(row) === null) return [];
+  return DETAIL_KEYS.filter((key) => key !== 'name' && product[key] === '' && row.newProduct[key].trim() !== '');
+}
+
+/** What was read from the photos, when there is anything the server would accept. */
+function readDetails(row: CountRow): ProductDetails | null {
+  const details = trimDetails(row.newProduct);
+  const hasAny = DETAIL_KEYS.some((key) => key !== 'name' && details[key] !== '');
+  // The name is not checked: a listed product keeps its own.
+  return hasAny && detailProblems({ ...details, name: 'listed' }).length === 0 ? details : null;
+}
+
 export function toCountRowInput(row: CountRow): CountRowInput {
   const isNew = row.productCode === null;
   return {
     productCode: row.productCode,
     newProduct: isNew ? trimDetails(row.newProduct) : null,
+    details: isNew ? null : readDetails(row),
     fullCartons: row.fullCartons,
     packSize: row.packSize,
     loosePieces: row.loosePieces,

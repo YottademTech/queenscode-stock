@@ -71,8 +71,10 @@ async function call<T>(action: string, payload: object, dataSchema: z.ZodType<T>
 export const api = {
   bootstrap: () => call('bootstrap', {}, bootstrapSchema, QUICK_TIMEOUT_MS),
   stock: () => call('stock', {}, stockSchema, QUICK_TIMEOUT_MS),
-  analyzeCount: (location: string, image: EncodedImage) =>
-    call('analyzeCount', { location, image }, countAnalysisSchema, PHOTO_TIMEOUT_MS),
+  /** The first photo is counted; any after it are detail photos read in the same request. */
+  analyzeCount: (location: string, images: readonly EncodedImage[]) =>
+    // A lone photo keeps the form every version of the Apps Script understands.
+    call('analyzeCount', images.length === 1 ? { location, image: images[0] } : { location, images }, countAnalysisSchema, PHOTO_TIMEOUT_MS),
   readProductLabel: (image: EncodedImage) => call('readProductLabel', { image }, labelReadingSchema, PHOTO_TIMEOUT_MS),
   saveCounts: (input: SaveCountsInput) => call('saveCounts', input, saveResultSchema, QUICK_TIMEOUT_MS),
   saveAdjustment: (input: AdjustmentInput) => call('adjust', input, saveResultSchema, QUICK_TIMEOUT_MS),

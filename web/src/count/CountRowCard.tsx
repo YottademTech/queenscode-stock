@@ -1,10 +1,11 @@
 import { confidenceSchema, type Confidence, type Product, type ProductDetails } from '../api/contract';
+import { DETAIL_LABELS } from '../products/details';
 import { ProductDetailFields } from '../products/ProductDetailFields';
 import { ProductPicker, SelectField } from '../shared/fields';
 import { Icon } from '../shared/Icon';
 import { ANY_PACK, containerAt } from './containers';
 import { QuantityFields } from './QuantityFields';
-import { findProduct, packSizeFor, totalPieces, type CountRow, type Quantities, type RowDetails } from './countState';
+import { detailsToFill, findProduct, packSizeFor, totalPieces, type CountRow, type Quantities, type RowDetails } from './countState';
 
 type CountRowCardProps = {
   row: CountRow;
@@ -26,6 +27,7 @@ export function CountRowCard(props: CountRowCardProps) {
   const product = findProduct(products, row.productCode);
   const container = containerAt(row.location);
   const unit = container ?? ANY_PACK;
+  const filling = detailsToFill(row, product);
 
   const changeNewProduct = (change: Partial<ProductDetails>) =>
     props.onDetailsChange({ newProduct: { ...row.newProduct, ...change } });
@@ -54,6 +56,12 @@ export function CountRowCard(props: CountRowCardProps) {
           <legend>New product details (added to the Products tab)</legend>
           <ProductDetailFields value={row.newProduct} onChange={changeNewProduct} />
         </fieldset>
+      )}
+
+      {filling.length > 0 && (
+        <p className="hint">
+          Read from the photos and added to this product, where the Sheet has nothing yet: {filling.map((key) => DETAIL_LABELS[key].toLowerCase()).join(', ')}.
+        </p>
       )}
 
       <QuantityFields value={row} container={container} recordedPackSize={product?.packSize ?? null} onChange={props.onQuantitiesChange} />

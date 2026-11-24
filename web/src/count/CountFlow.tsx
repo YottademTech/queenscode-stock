@@ -4,14 +4,14 @@ import type { Bootstrap } from '../api/contract';
 import { createRequestIds, newId } from '../lib/id';
 import { COUNT_PHOTO_EDGE, preparePhoto, type PreparedPhoto } from '../lib/image';
 import { submitSave } from '../lib/saves';
-import { NoticeBox, PhotoButtons, SelectField, type Notice } from '../shared/fields';
+import { NoticeBox, PhotoButtons, SelectField, SwitchField, type Notice } from '../shared/fields';
 import { Icon } from '../shared/Icon';
 import { CameraSheet, canUseCamera } from './CameraSheet';
 import { CountRowCard } from './CountRowCard';
 import { ANY_PACK, containerAt, countingHint } from './containers';
 import {
-  canSaveUnattended, countReducer, emptyCount, groupByLocation, rowProblems, rowsFromAnalysis, rowsPerProduct, savedCount,
-  toCountRowInput, type CountRow,
+  canSaveUnattended, countReducer, emptyCount, groupByLocation, photoCount, rowProblems, rowsFromAnalysis, rowsPerProduct, savedCount,
+  toCountRowInput, type CountRow, type Photo,
 } from './countState';
 
 /** Claude takes a few seconds per photo, so several are read side by side. */
@@ -22,12 +22,23 @@ const AUTO_RETRY_MS = 15_000;
 const PASSING_FAILURES = new Set(['network', 'busy', 'claude_unavailable', 'service_unavailable']);
 
 const AUTO_SAVE_KEY = 'stock.autosave';
+const PHOTO_SETS_KEY = 'stock.photosets';
 
-function rememberedAutoSave(): boolean {
+/** An on/off choice the counter made earlier on this phone. */
+function rememberedChoice(key: string, fallback: boolean): boolean {
   try {
-    return window.localStorage.getItem(AUTO_SAVE_KEY) !== 'off';
+    const stored = window.localStorage.getItem(key);
+    return stored === null ? fallback : stored === 'on';
   } catch {
-    return true;
+    return fallback;
+  }
+}
+
+function rememberChoice(key: string, enabled: boolean) {
+  try {
+    window.localStorage.setItem(key, enabled ? 'on' : 'off');
+  } catch {
+    // The choice still holds until the app is closed.
   }
 }
 
@@ -38,7 +49,8 @@ type CountFlowProps = { bootstrap: Bootstrap; counter: string; onSaved: () => vo
 export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
   const [state, dispatch] = useReducer(countReducer, emptyCount);
   const [location, setLocation] = useState(bootstrap.locations[0] ?? '');
-  const [autoSave, setAutoSave] = useState(rememberedAutoSave);
+  const [autoSave, setAutoSave] = useState(() => rememberedChoice(AUTO_SAVE_KEY, true));
+  const [photoSets, setPhotoSets] = useState(() => rememberedChoice(PHOTO_SETS_KEY, false));
   const [cameraOpen, setCameraOpen] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const startedPhotoIds = useRef(new Set<string>());
@@ -82,7 +94,7 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
 
     startedPhotoIds.current.add(next.id);
     dispatch({ type: 'readingStarted', photoId: next.id });
-    void api.analyzeCount(next.location, next.image).then((result) => {
+    void api.analyzeCount(next.location, [next.image, ...next.details.map((detail) => detail.image)]).then((result) => {
       startedPhotoIds.current.delete(next.id);
       if (!result.ok) {
         dispatch({ type: 'readingFailed', photoId: next.id, message: result.error.message, retryable: PASSING_FAILURES.has(result.error.code) });
@@ -123,7 +135,15 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
   const countingPhotos = state.photos.filter((photo) => photo.status.kind === 'waiting' || photo.status.kind === 'reading').length;
   const failedPhotos = state.photos.filter((photo) => photo.status.kind === 'failed').length;
 
+  // A set is the count photo plus detail photos of the same stock, read by Claude in one request.
+  // The option only exists when the Apps Script can take more than one photo.
+  const setLimit = bootstrap.photoSetLimit;
+  const usingSets = photoSets && setLimit > 1;
+  const openSet = state.photos.find((photo) => photo.status.kind === 'collecting') ?? null;
+  const openSetSize = openSet ? photoCount(openSet) : 0;
+
   const progress = [
+    openSet && `1 set open (${plural(openSetSize, 'photo', 'photos')})`,
     countingPhotos > 0 && `${plural(countingPhotos, 'photo', 'photos')} being counted`,
     savingRows > 0 && `${plural(savingRows, 'row', 'rows')} saving`,
     state.saved.length > 0 && `${state.saved.length} saved`,
@@ -139,11 +159,22 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
     bootstrap.counted.find((entry) => entry.code === row.productCode && entry.location === row.location)?.pieces ?? 0;
 
   const addPhoto = (prepared: PreparedPhoto) => {
-    dispatch({ type: 'photoAdded', photo: { id: newId(), ...prepared, location, failures: 0, status: { kind: 'waiting' } } });
+    const photo: Photo = { id: newId(), ...prepared, details: [], location, failures: 0, status: { kind: 'waiting' } };
+    dispatch(usingSets ? { type: 'setPhotoAdded', photo, limit: setLimit } : { type: 'photoAdded', photo });
   };
 
   const handleFiles = async (files: File[]) => {
     setNotice(null);
+    const room = setLimit - openSetSize;
+    if (usingSets && files.length > room) {
+      const text = room === 0
+        ? 'This set is full. Count it before adding more photos.'
+        : openSet
+          ? `This set has room for ${plural(room, 'more photo', 'more photos')}. Pick fewer, or count it first.`
+          : `A set holds up to ${setLimit} photos: 1 to count and ${setLimit - 1} for details. Pick fewer.`;
+      setNotice({ tone: 'error', text });
+      return;
+    }
     let unreadable = 0;
     for (const file of files) {
       try {
@@ -159,11 +190,22 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
 
   const handleAutoSaveChange = (enabled: boolean) => {
     setAutoSave(enabled);
-    try {
-      window.localStorage.setItem(AUTO_SAVE_KEY, enabled ? 'on' : 'off');
-    } catch {
-      // The choice still holds until the app is closed.
-    }
+    rememberChoice(AUTO_SAVE_KEY, enabled);
+  };
+
+  const closeOpenSet = () => dispatch({ type: 'openSetClosed' });
+
+  const handlePhotoSetsChange = (enabled: boolean) => {
+    setPhotoSets(enabled);
+    rememberChoice(PHOTO_SETS_KEY, enabled);
+    // A set left open would never be counted once the option is off.
+    if (!enabled) closeOpenSet();
+  };
+
+  // Leaving the camera sends the set in hand, so nothing waits on a button the counter may not see.
+  const handleCameraClose = () => {
+    closeOpenSet();
+    setCameraOpen(false);
   };
 
   const handleSave = async () => {
@@ -184,13 +226,20 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
       <SelectField label="Where are you counting?" value={location} options={bootstrap.locations} onChange={setLocation} />
       <p className="hint">{countingHint(location)}</p>
 
-      <label className="switch">
-        <input type="checkbox" role="switch" checked={autoSave} onChange={(event) => handleAutoSaveChange(event.target.checked)} />
-        <span>
-          <strong>Save counts as they come in</strong>
-          <small>Take a photo and move on. Only rows that need you are held back.</small>
-        </span>
-      </label>
+      <SwitchField
+        label="Save counts as they come in"
+        hint="Take a photo and move on. Only rows that need you are held back."
+        checked={autoSave}
+        onChange={handleAutoSaveChange}
+      />
+      {setLimit > 1 && (
+        <SwitchField
+          label="Add front and back photos"
+          hint={`The first photo is counted. Up to ${setLimit - 1} more of the same product, such as its front and back, let Claude fill in its details in the same request.`}
+          checked={photoSets}
+          onChange={handlePhotoSetsChange}
+        />
+      )}
       {autoSave && counter.trim() === '' && <p className="hint warn">Enter your name at the top, or counts will wait here for you to save them.</p>}
 
       <details className="tips">
@@ -201,6 +250,7 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
           <li>Bags and sacks: step back so every one in the pile shows. Claude counts the full ones; you enter the pieces in each.</li>
           <li>Open bags and sacks are not full ones. Count what is left inside as loose pieces.</li>
           <li>Keep variants apart. Rich Glow black and Rich Glow yellow are different products.</li>
+          {setLimit > 1 && <li>With front and back photos on: take the stock first, then close-ups of one item, label filling the frame. Only the first photo is counted.</li>}
         </ul>
       </details>
 
@@ -212,9 +262,33 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
       {state.photos.length > 0 && (
         <ul className="photo-strip" aria-label="Photos">
           {state.photos.map((photo, index) => (
-            <li key={photo.id} className="photo">
+            <li key={photo.id} className={`photo${photo.status.kind === 'collecting' ? ' open-set' : ''}`}>
               <img src={photo.previewUrl} alt={`Photo ${index + 1}, ${photo.location}`} />
+              {photo.details.length > 0 && (
+                <ul className="detail-photos" aria-label={`Detail photos of photo ${index + 1}`}>
+                  {photo.details.map((detail, detailIndex) => (
+                    <li key={detailIndex}>
+                      {photo.status.kind === 'collecting' ? (
+                        <button
+                          type="button"
+                          className="detail-photo"
+                          aria-label={`Remove detail photo ${detailIndex + 1}`}
+                          onClick={() => dispatch({ type: 'detailPhotoRemoved', photoId: photo.id, index: detailIndex })}
+                        >
+                          <img src={detail.previewUrl} alt="" />
+                          <span className="detail-remove-mark" aria-hidden="true"><Icon name="close" size={12} /></span>
+                        </button>
+                      ) : (
+                        <img src={detail.previewUrl} alt={`Detail photo ${detailIndex + 1}`} />
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
               <p className="photo-status">
+                {photo.status.kind === 'collecting' && (photo.details.length === 0
+                  ? 'This photo is counted. Add the front and back of the product, then count the set.'
+                  : `Counted photo plus ${plural(photo.details.length, 'detail photo', 'detail photos')}. Tap a detail photo to remove it.`)}
                 {photo.status.kind === 'waiting' && 'Waiting its turn'}
                 {photo.status.kind === 'reading' && 'Claude is counting…'}
                 {photo.status.kind === 'done' && (photo.status.note || 'Counted')}
@@ -226,6 +300,12 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
                 )}
               </p>
               <div className="button-row">
+                {photo.status.kind === 'collecting' && (
+                  <button type="button" className="button small primary" onClick={closeOpenSet}>
+                    <Icon name="check" size={18} />
+                    Count this set
+                  </button>
+                )}
                 {photo.status.kind === 'failed' && (
                   <button type="button" className="button small" onClick={() => dispatch({ type: 'photoRetried', photoId: photo.id })}>
                     <Icon name="refresh" size={18} />
@@ -326,7 +406,15 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
         </>
       )}
 
-      {cameraOpen && <CameraSheet location={location} progress={progress} onShot={addPhoto} onClose={() => setCameraOpen(false)} />}
+      {cameraOpen && (
+        <CameraSheet
+          location={location}
+          progress={progress}
+          set={usingSets ? { taken: openSetSize, limit: setLimit, onNext: closeOpenSet } : undefined}
+          onShot={addPhoto}
+          onClose={handleCameraClose}
+        />
+      )}
     </section>
   );
 }

@@ -9,6 +9,11 @@ type CameraSheetProps = {
   location: string;
   /** What is happening to the shots already taken, for example "2 being counted, 5 saved". */
   progress: string;
+  /**
+   * Given while photo sets are on: how many photos the open set holds, how many it can hold, and
+   * what to do when the counter moves to the next product.
+   */
+  set?: { taken: number; limit: number; onNext: () => void };
   onShot: (photo: PreparedPhoto) => void;
   onClose: () => void;
 };
@@ -20,7 +25,7 @@ export const canUseCamera = typeof navigator !== 'undefined' && window.isSecureC
  * A full-screen camera that stays open between shots: tap, move to the next shelf, tap again.
  * Each shot is handed straight to the caller, which counts it in the background.
  */
-export function CameraSheet({ location, progress, onShot, onClose }: CameraSheetProps) {
+export function CameraSheet({ location, progress, set, onShot, onClose }: CameraSheetProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const shutterRef = useRef<HTMLButtonElement>(null);
   const [camera, setCamera] = useState<CameraState>({ kind: 'starting' });
@@ -79,6 +84,15 @@ export function CameraSheet({ location, progress, onShot, onClose }: CameraSheet
     window.setTimeout(() => setFlash(false), 120);
   };
 
+  const setIsFull = set !== undefined && set.taken >= set.limit;
+  const guidance = !set
+    ? shots === 0 ? 'Tap to take a photo. Keep going: counting happens in the background.' : `${shots} taken. ${progress}`
+    : set.taken === 0
+      ? 'Photo 1: the stock to count.'
+      : setIsFull
+        ? 'This set is full. Tap Next for the next product.'
+        : `Now the front and back of the product (${set.taken} of ${set.limit} taken). Tap Next when done.`;
+
   return (
     <div className="camera" role="dialog" aria-modal="true" aria-label="Camera">
       <video ref={videoRef} className="camera-view" playsInline muted />
@@ -96,16 +110,25 @@ export function CameraSheet({ location, progress, onShot, onClose }: CameraSheet
         <p className="camera-progress" role="status" aria-live="polite">
           {camera.kind === 'starting' && 'Opening the camera…'}
           {camera.kind === 'failed' && camera.message}
-          {camera.kind === 'live' && (shots === 0 ? 'Tap to take a photo. Keep going: counting happens in the background.' : `${shots} taken. ${progress}`)}
+          {camera.kind === 'live' && guidance}
         </p>
-        <button
-          ref={shutterRef}
-          type="button"
-          className="camera-shutter"
-          disabled={camera.kind !== 'live'}
-          aria-label="Take photo"
-          onClick={handleShutter}
-        />
+        {set && <p className="camera-status">{progress}</p>}
+        <div className="camera-controls">
+          <button
+            ref={shutterRef}
+            type="button"
+            className="camera-shutter"
+            disabled={camera.kind !== 'live' || setIsFull}
+            aria-label={!set ? 'Take photo' : set.taken === 0 ? 'Take the count photo' : 'Take a detail photo'}
+            onClick={handleShutter}
+          />
+          {set && (
+            <button type="button" className="camera-next" disabled={set.taken === 0} onClick={set.onNext}>
+              <Icon name="check" size={18} />
+              Next
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

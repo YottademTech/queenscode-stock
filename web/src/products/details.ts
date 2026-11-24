@@ -65,4 +65,11 @@ export const MORE_LONG_FIELDS: readonly (DetailField & { rows: number; hint?: st
   { key: 'labelText', label: 'All text on the pack', rows: 4 },
 ];
 
+/** How each detail is named on screen. */
+export const DETAIL_LABELS: Record<DetailKey, string> = {
+  ...(Object.fromEntries([...MAIN_FIELDS, ...MORE_SHORT_FIELDS, ...MORE_LONG_FIELDS].map((field) => [field.key, field.label])) as Record<DetailKey, string>),
+  name: 'Name',
+  qrCode: 'QR code',
+};
+
 export const MORE_KEYS: readonly DetailKey[] = [...MORE_SHORT_FIELDS, ...MORE_LONG_FIELDS].map((field) => field.key);

@@ -249,6 +249,68 @@ test('everything Claude reads off a product photo is returned, with nothing inve
   assert.deepEqual(sent.body.output_config.format.schema.required, [...detailsAskedOfClaude, 'note']);
 });
 
+test('a count photo with front and back detail photos goes to Claude as one request', () => {
+  const front = { data: Buffer.from('front label').toString('base64'), mediaType: 'image/jpeg' };
+  const back = { data: Buffer.from('back label').toString('base64'), mediaType: 'image/png' };
+  const backend = loadBackend({
+    claudeReplies: [claudeAnswer({
+      photoNote: 'One product, with two close-ups.',
+      items: [countedItem({ confidence: 'High', brand: 'Rich Glow', ingredients: 'Aqua, Glycerin', batchNumber: 'L2291', note: '' })],
+    })],
+  });
+
+  const reply = backend.post({ action: 'analyzeCount', location: 'Shop shelf', images: [PHOTO, front, back] });
+
+  assert.equal(reply.ok, true);
+  // The details read off the close-ups come back even though the product is already listed.
+  assert.deepEqual(
+    [reply.data.items[0].productCode, reply.data.items[0].loosePieces, reply.data.items[0].brand, reply.data.items[0].ingredients, reply.data.items[0].batchNumber],
+    ['RG-BLK-500', 11, 'Rich Glow', 'Aqua, Glycerin', 'L2291'],
+  );
+
+  assert.equal(backend.recorded.claudeRequests.length, 1, 'one request for the whole set');
+  assert.equal(backend.store.get('CLAUDE_CALLS_COUNT'), '1');
+  const content = backend.recorded.claudeRequests[0].body.messages[0].content;
+  assert.deepEqual(content.slice(0, 6), [
+    { type: 'text', text: 'Photo 1, the count photo:' },
+    { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: PHOTO.data } },
+    { type: 'text', text: 'Photo 2, a detail photo:' },
+    { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: front.data } },
+    { type: 'text', text: 'Photo 3, a detail photo:' },
+    { type: 'image', source: { type: 'base64', media_type: 'image/png', data: back.data } },
+  ]);
+  assert.equal(content.length, 7);
+  assert.match(content[6].text, /Location: Shop shelf/);
+  assert.match(content[6].text, /Count from photo 1 only/);
+  assert.match(content[6].text, /record the details shown in all 3 photos/);
+  assert.match(backend.recorded.claudeRequests[0].body.system, /exception is when the message says detail photos were added/);
+});
+
+test('one photo sent as a list is read exactly like a single photo', () => {
+  const backend = loadBackend({ claudeReplies: [claudeAnswer({ photoNote: '', items: [] })] });
+  assert.equal(backend.post({ action: 'analyzeCount', location: 'Shop shelf', images: [PHOTO] }).ok, true);
+
+  const content = backend.recorded.claudeRequests[0].body.messages[0].content;
+  assert.deepEqual(content[0], { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: PHOTO.data } });
+  assert.equal(content.length, 2);
+  assert.match(content[1].text, /Count the stock in this photo\.$/);
+  assert.doesNotMatch(content[1].text, /Detail photos/);
+});
+
+test('a photo set that is empty, too large or holds a bad photo never reaches Claude', () => {
+  const backend = loadBackend({ properties: { CLAUDE_CALLS_COUNT: null } });
+  const send = (images) => backend.post({ action: 'analyzeCount', location: 'Shop shelf', images });
+
+  assert.equal(backend.post({ action: 'bootstrap' }).data.photoSetLimit, 4);
+  assert.match(send([]).error.message, /Send 1 to 4 photos/);
+  assert.match(send([PHOTO, PHOTO, PHOTO, PHOTO, PHOTO]).error.message, /Send 1 to 4 photos/);
+  assert.match(send('photo').error.message, /Send 1 to 4 photos/);
+  assert.match(send([PHOTO, { data: 'not base64!', mediaType: 'image/jpeg' }]).error.message, /photo data is not valid/);
+  assert.match(send([PHOTO, { data: PHOTO.data, mediaType: 'image/gif' }]).error.message, /JPEG, PNG or WebP/);
+  assert.equal(backend.recorded.claudeRequests.length, 0);
+  assert.equal(backend.store.get('CLAUDE_CALLS_COUNT'), undefined, 'a refused set must not use up the daily limit');
+});
+
 // --- Saving counts ---------------------------------------------------------
 
 test('confirmed rows fill the first empty Claude_Counts rows without touching the formula columns', () => {
@@ -318,6 +380,37 @@ test('every detail of a new product is stored in the Products tab and comes back
   assert.match(tooLong.error.message, /label text is too long/);
   const badDate = backend.post(saveCounts([countRow({ productCode: null, newProduct: { name: 'X', manufactureDate: '10/2025' } })], { requestId: 'request-0004' }));
   assert.match(badDate.error.message, /manufacture date must be YYYY-MM-DD or YYYY-MM/);
+});
+
+test('details read from the photos fill a listed product where the Sheet has nothing, and replace nothing', () => {
+  const backend = loadBackend();
+  const products = backend.workbook.get('Products');
+  const read = {
+    ...noDetails, name: 'RICH GLOW advanced lotion', size: '250ml', barcode: '6034000999999', brand: 'Rich Glow', category: 'Body lotion',
+    ingredients: '=Aqua, Glycerin', labelText: 'RICH GLOW\nADVANCED WHITENING',
+  };
+
+  const reply = backend.post(saveCounts([
+    countRow({ productCode: 'RG-BLK-500', details: read }),
+    // A second row for the same product does not overwrite what the first one filled.
+    countRow({ productCode: 'RG-BLK-500', details: { ...noDetails, brand: 'Other brand', variant: 'Black' }, loosePieces: 2 }),
+    // Claude was not sure which product this was, so its reading is not written into the record.
+    countRow({ productCode: 'RG-YEL', confidence: 'Low', details: { ...noDetails, brand: 'Guessed brand' } }),
+  ]));
+  assert.equal(reply.ok, true);
+
+  // Name (B) and size (C) were already there and stay; the empty cells are filled.
+  assert.deepEqual(products.rowValues(2, 21), [
+    'RG-BLK-500', 'Rich Glow Advanced Whitening Lotion (Black)', '500ml', '6034000999999', '', '', 'Body lotion', '', '',
+    'Rich Glow', 'Black', '', '', '', '', '', "'=Aqua, Glycerin", '', '', 'RICH GLOW\nADVANCED WHITENING', '',
+  ]);
+  assert.deepEqual(products.rowValues(3, 21).slice(6), new Array(15).fill(''), 'a Low-confidence row fills nothing');
+  assert.equal(backend.workbook.get('Claude_Counts').rowValues(5, 3)[2], 'RG-YEL', 'the counts themselves are all saved');
+
+  const badDetails = backend.post(saveCounts([countRow({ details: { ...noDetails, expiry: 'next year' } })], { requestId: 'request-0005' }));
+  assert.match(badDetails.error.message, /Row 1 details expiry date must be YYYY-MM-DD or YYYY-MM/);
+  // A row from an app that predates detail photos has no details at all.
+  assert.equal(backend.post(saveCounts([countRow()], { requestId: 'request-0006' })).ok, true);
 });
 
 test('new products reuse a listed product of the same name and keep names unique across sizes', () => {
