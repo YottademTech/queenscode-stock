@@ -74,7 +74,7 @@ export function HandCountFlow({ bootstrap, counter, onSaved }: HandCountFlowProp
 
   return (
     <section aria-labelledby="hand-heading">
-      <h2 id="hand-heading">Count by hand</h2>
+      <h2 id="hand-heading">Adjustments</h2>
       <p className="hint">Use this to fix a photo count, or for stock a photo cannot show. It never uses Claude.</p>
 
       <form onSubmit={handleSubmit} className="card">
