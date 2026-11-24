@@ -6,6 +6,7 @@ import {
   saveResultSchema,
   stockSchema,
   type AdjustmentInput,
+  type DeleteProductInput,
   type EncodedImage,
   type SaveCountsInput,
   type SaveProductInput,
@@ -79,4 +80,5 @@ export const api = {
   saveCounts: (input: SaveCountsInput) => call('saveCounts', input, saveResultSchema, QUICK_TIMEOUT_MS),
   saveAdjustment: (input: AdjustmentInput) => call('adjust', input, saveResultSchema, QUICK_TIMEOUT_MS),
   saveProduct: (input: SaveProductInput) => call('saveProduct', input, saveResultSchema, PHOTO_TIMEOUT_MS),
+  deleteProduct: (input: DeleteProductInput) => call('deleteProduct', input, saveResultSchema, QUICK_TIMEOUT_MS),
 };

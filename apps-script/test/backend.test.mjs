@@ -85,6 +85,8 @@ test('bootstrap returns the stocktake, products and what is already counted', ()
   assert.deepEqual(data.adjustmentTypes, { correct: 'Correct the count', add: 'Add stock', remove: 'Remove stock' });
   assert.deepEqual(data.products.map((product) => [product.code, product.packSize]), [['RG-BLK-500', null], ['RG-YEL', 12]]);
   assert.deepEqual(data.counted, [{ code: 'RG-YEL', location: 'Shop shelf', pieces: 8 }]);
+  // The app offers an action only when the deployed script lists it.
+  assert.ok(data.actions.includes('deleteProduct'));
 });
 
 test('reads explain that setup() is needed when the sheet has not been prepared', () => {
@@ -561,6 +563,58 @@ test('a hand count is appended to the adjustments tab under the product name the
     assert.equal(backend.post({ ...request, requestId: 'request-0201', ...bad }).error.code, 'invalid_request');
   }
   assert.equal(sheet.getLastRow(), 3);
+});
+
+const deleteProduct = (productCode, overrides = {}) => ({ action: 'deleteProduct', requestId: 'request-0300', productCode, ...overrides });
+
+test('deleting a product removes it with its photo counts and hand counts, and leaves other products alone', () => {
+  const backend = loadBackend();
+  backend.post(saveCounts([countRow()]));
+  backend.post({ action: 'adjust', requestId: 'request-0301', location: 'Shop shelf', counter: 'Kofi', productCode: 'RG-YEL', type: 'correct', quantity: 30, reason: '' });
+
+  assert.deepEqual(backend.post(deleteProduct('RG-YEL')), { ok: true, data: { duplicate: false } });
+
+  const { workbook } = backend;
+  assert.deepEqual(workbook.get('Products').rowValues(3, 21), new Array(21).fill(''));
+  assert.deepEqual(productRows(workbook).map((cells) => cells[0]), ['RG-BLK-500']);
+
+  const counts = workbook.get('Claude_Counts');
+  // D and H are the tab's formula columns; the fixture holds their results for this row.
+  assert.deepEqual(counts.rowValues(2, 10), ['', '', '', 'Rich Glow Yellow Tone Lotion', '', '', '', 8, '', ''], 'the formula columns stay');
+  assert.equal(counts.rowValues(3, 3)[2], 'RG-BLK-500');
+
+  const adjustments = workbook.get('Form_Adjustments');
+  assert.equal(adjustments.getLastRow(), 2);
+  assert.equal(adjustments.rowValues(2, 5)[4], 'Rich Glow Advanced Whitening Lotion (Black)');
+
+  const { data } = backend.post({ action: 'bootstrap' });
+  assert.deepEqual(data.products.map((product) => product.code), ['RG-BLK-500']);
+  assert.deepEqual(data.counted.map((entry) => entry.code), ['RG-BLK-500']);
+  assert.equal(backend.recorded.lockHeld, false);
+});
+
+test('the row a deleted product leaves is taken by the next new product, which starts with nothing counted', () => {
+  const backend = loadBackend();
+  backend.post(deleteProduct('RG-YEL'));
+  backend.post(saveProduct({ name: 'Rich Glow Yellow Tone Lotion', size: '' }));
+
+  const { data } = backend.post({ action: 'bootstrap' });
+  assert.deepEqual(data.products.map((product) => product.name), ['Rich Glow Advanced Whitening Lotion (Black)', 'Rich Glow Yellow Tone Lotion']);
+  assert.equal(backend.workbook.get('Products').rowValues(3, 2)[1], 'Rich Glow Yellow Tone Lotion');
+  assert.deepEqual(data.counted, []);
+});
+
+test('a delete is refused for a product that is not there, and a resent delete is not applied twice', () => {
+  const backend = loadBackend();
+
+  assert.equal(backend.post(deleteProduct('GONE')).error.code, 'invalid_request');
+  assert.equal(backend.post(deleteProduct('')).error.code, 'invalid_request');
+  assert.equal(productRows(backend.workbook).length, 2);
+
+  assert.deepEqual(backend.post(deleteProduct('RG-YEL')).data, { duplicate: false });
+  assert.deepEqual(backend.post(deleteProduct('RG-YEL')).data, { duplicate: true });
+  assert.equal(backend.post(deleteProduct('RG-YEL', { requestId: 'request-0302' })).error.code, 'invalid_request');
+  assert.equal(productRows(backend.workbook).length, 1);
 });
 
 // --- Setup -----------------------------------------------------------------

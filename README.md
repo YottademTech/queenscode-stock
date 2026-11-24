@@ -24,6 +24,17 @@ Each row also has a **QR code** column for what a QR code on the pack holds. Cla
 for it, because a photo cannot be relied on to decode one: staff type, paste or scan it in. Like
 the barcode, it is optional.
 
+## Deleting a product
+
+On the Products screen, open a product and tap **Delete product**, then confirm. The product is
+removed from the Products tab together with what was counted for it: its rows in Claude_Counts
+and its hand counts in the adjustments tab. A product added later under the same name starts from
+nothing. The row is emptied, not removed, because each Stock row mirrors the Products row at the
+same position; the next new product takes it. The product's photo stays in Drive. The app cannot
+undo a delete; the Sheet's version history can.
+
+The button appears only when the deployed Apps Script supports it.
+
 ## Front and back photos
 
 On the Photo screen, **Add front and back photos** groups photos into a set: the first photo is the

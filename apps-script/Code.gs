@@ -99,6 +99,7 @@ const ACTIONS = {
   readProductLabel: readProductLabel,
   saveCounts: saveCounts,
   saveProduct: saveProduct,
+  deleteProduct: deleteProduct,
   adjust: saveAdjustment,
 };
 
@@ -195,6 +196,8 @@ function bootstrap() {
     counted: readCountedToday(ss, settings, timeZone),
     // Tells the app that this script can read several photos in one request, and how many.
     photoSetLimit: MAX_PHOTOS_PER_COUNT,
+    // What this deployed script can do, so the app only offers what will work.
+    actions: Object.keys(ACTIONS),
   };
 }
 
@@ -671,6 +674,39 @@ function saveProduct(request) {
       writeNewProduct(sheet, row, Object.assign({}, input, { code: code }));
     }
     if (imageUrl) sheet.getRange(row, IMAGE_COLUMN).setValue(imageUrl);
+  });
+}
+
+/**
+ * Removes a product with everything counted for it, so a product added later under the same code
+ * or name starts from nothing. The Products row is emptied, not removed, because each Stock row
+ * mirrors the Products row at the same position; the next new product takes the empty row.
+ * The product's photo stays in Drive.
+ */
+function deleteProduct(request) {
+  const ss = spreadsheet();
+  const settings = readSettings(ss);
+  const code = requiredText(request.productCode, 'product', 60);
+
+  return withWriteLock(ss, request, () => {
+    const product = readProducts(ss).filter((candidate) => candidate.code === code)[0];
+    if (!product) throw new AppError('invalid_request', 'That product is no longer in the Sheet. Reload the app.');
+
+    // Photo counts are kept by code. Columns D and H hold the tab's formulas and stay.
+    const counts = requireSheet(ss, SHEET.counts);
+    counts.getRange(COUNT_FIRST_ROW, 3, COUNT_ROW_COUNT, 1).getValues().forEach((cells, index) => {
+      if (String(cells[0]).trim() !== code) return;
+      [[1, 3], [5, 3], [9, 2]].forEach((span) => counts.getRange(COUNT_FIRST_ROW + index, span[0], 1, span[1]).clearContent());
+    });
+
+    // Hand counts are kept by product name. From the bottom, so removing a row does not move the ones still to check.
+    const adjustments = requireSheet(ss, settings.adjustmentsTab);
+    const names = adjustments.getLastRow() < 2 ? [] : adjustments.getRange(2, 5, adjustments.getLastRow() - 1, 1).getValues();
+    for (let i = names.length - 1; i >= 0; i--) {
+      if (product.name !== '' && sameName(names[i][0], product.name)) adjustments.deleteRow(2 + i);
+    }
+
+    requireSheet(ss, SHEET.products).getRange(product.row, 1, 1, PRODUCT_COLUMN_COUNT).clearContent();
   });
 }
 

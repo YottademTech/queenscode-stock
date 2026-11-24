@@ -10,16 +10,21 @@ import { ProductDetailFields } from './ProductDetailFields';
 
 type FormValues = ProductDetails & { packSize: number | null; reorderLevel: number | null };
 
-type Activity = 'idle' | 'reading' | 'saving';
+type Activity = 'idle' | 'reading' | 'saving' | 'deleting';
 
 type ProductFormProps = {
   /** The product being edited, or null to add a new one. */
   product: Product | null;
-  onSaved: (message: string) => void;
+  /** Pieces counted by photo for this product in the current stocktake, named before a delete. */
+  countedPieces: number;
+  /** False when the deployed Apps Script cannot delete products yet. */
+  canDelete: boolean;
+  /** Called with a message for the list once the product is saved or deleted. */
+  onDone: (message: string) => void;
   onCancel: () => void;
 };
 
-export function ProductForm({ product, onSaved, onCancel }: ProductFormProps) {
+export function ProductForm({ product, countedPieces, canDelete, onDone, onCancel }: ProductFormProps) {
   const [values, setValues] = useState<FormValues>({
     ...(product ? pickDetails(product) : emptyDetails()),
     packSize: product?.packSize ?? null,
@@ -28,7 +33,9 @@ export function ProductForm({ product, onSaved, onCancel }: ProductFormProps) {
   const [photo, setPhoto] = useState<PreparedPhoto | null>(null);
   const [activity, setActivity] = useState<Activity>('idle');
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const requestIds = useRef(createRequestIds()).current;
+  const isWriting = activity === 'saving' || activity === 'deleting';
 
   const problems = detailProblems(values);
   const savedPhotoUrl = product ? driveThumbnail(product.imageUrl, 400) : null;
@@ -92,11 +99,30 @@ export function ProductForm({ product, onSaved, onCancel }: ProductFormProps) {
       return;
     }
     requestIds.reset();
-    onSaved(`Saved ${content.product.name}.`);
+    onDone(`Saved ${content.product.name}.`);
+  };
+
+  const handleDelete = async () => {
+    if (!product) return;
+    setActivity('deleting');
+    setNotice(null);
+    const result = await api.deleteProduct({ requestId: requestIds.for({ delete: product.code }), productCode: product.code });
+    setActivity('idle');
+
+    if (!result.ok) {
+      setConfirmingDelete(false);
+      setNotice({ tone: 'error', text: result.error.message });
+      return;
+    }
+    requestIds.reset();
+    onDone(`Deleted ${product.name}.`);
   };
 
   return (
     <form onSubmit={handleSubmit} className="card">
+      <button type="button" className="back-button" aria-label="Back to products" disabled={isWriting} onClick={onCancel}>
+        <Icon name="back" size={24} />
+      </button>
       <h3>{product ? `Edit ${product.name}` : 'Add a product'}</h3>
 
       <fieldset className="product-photo">
@@ -142,11 +168,40 @@ export function ProductForm({ product, onSaved, onCancel }: ProductFormProps) {
           <Icon name="check" />
           {activity === 'saving' ? 'Saving…' : 'Save product'}
         </button>
-        <button type="button" className="button quiet" disabled={activity === 'saving'} onClick={onCancel}>
+        <button type="button" className="button quiet" disabled={isWriting} onClick={onCancel}>
           <Icon name="close" />
           Cancel
         </button>
       </div>
+
+      {product && canDelete && (
+        <div className="delete-product">
+          {confirmingDelete ? (
+            <div className="notice error" role="group" aria-label="Delete this product">
+              <p id="delete-warning">
+                Delete {product.name}? It is removed from the Sheet with its photo counts and hand counts
+                {countedPieces > 0 && ` (${countedPieces} ${countedPieces === 1 ? 'piece' : 'pieces'} counted by photo in this stocktake)`}.
+                This cannot be undone in the app.
+              </p>
+              <div className="button-row">
+                <button type="button" className="button danger filled" disabled={activity !== 'idle'} aria-describedby="delete-warning" onClick={handleDelete}>
+                  <Icon name="trash" />
+                  {activity === 'deleting' ? 'Deleting…' : 'Delete it'}
+                </button>
+                {/* Focus lands on the safe answer. */}
+                <button type="button" className="button" autoFocus disabled={activity !== 'idle'} onClick={() => setConfirmingDelete(false)}>
+                  Keep it
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button type="button" className="button danger" disabled={activity !== 'idle'} onClick={() => setConfirmingDelete(true)}>
+              <Icon name="trash" />
+              Delete product
+            </button>
+          )}
+        </div>
+      )}
     </form>
   );
 }

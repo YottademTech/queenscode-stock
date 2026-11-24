@@ -28,6 +28,9 @@ class FakeRange {
     this.sheet.write(this.row, this.column, value);
     return this;
   }
+  clearContent() {
+    return this.setValues(this.getValues().map((cells) => cells.map(() => '')));
+  }
   // The fakes do not calculate: a formula is kept as its text, which is what the tests inspect.
   setFormula(formula) {
     return this.setValue(formula);

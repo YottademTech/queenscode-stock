@@ -28,6 +28,11 @@ describe('photo sets', () => {
     expect(bootstrapSchema.parse(bootstrap).photoSetLimit).toBe(1);
   });
 
+  it('reads what the Apps Script can do, and assumes nothing newer of one that does not say', () => {
+    expect(bootstrapSchema.parse({ ...bootstrap, actions: ['bootstrap', 'deleteProduct'] }).actions).toContain('deleteProduct');
+    expect(bootstrapSchema.parse(bootstrap).actions).toEqual([]);
+  });
+
   it('still accepts a save kept on the phone from before rows carried read details', () => {
     const older = { requestId: 'r-1', location: 'Shop shelf', counter: 'Ama', rows: [{ productCode: 'QBH-1', newProduct: null, fullCartons: 0, packSize: null, loosePieces: 3, confidence: 'High', note: '' }] };
     expect(saveCountsInputSchema.parse(older).rows[0]?.details).toBeNull();

@@ -42,6 +42,8 @@ export const bootstrapSchema = z.object({
   // How many photos one count request may hold: the count photo plus detail photos. An Apps Script
   // from before photo sets does not say, and reads one photo.
   photoSetLimit: z.number().int().min(1).default(1),
+  // What the deployed Apps Script can do. One from before it said so offers nothing newer.
+  actions: z.array(z.string()).default([]),
 });
 export type Bootstrap = z.infer<typeof bootstrapSchema>;
 
@@ -128,6 +130,8 @@ export const adjustmentInputSchema = z.object({
   reason: z.string(),
 });
 export type AdjustmentInput = z.infer<typeof adjustmentInputSchema>;
+
+export type DeleteProductInput = { requestId: string; productCode: string };
 
 export type SaveProductInput = {
   requestId: string;

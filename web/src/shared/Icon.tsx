@@ -13,6 +13,8 @@ const SHAPES = {
   trash: <path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 12.5h9l1-12.5M10 10.5v6M14 10.5v6" />,
   refresh: <path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4h-4" />,
   sparkle: <path d="M11 3.5l1.9 5.1 5.1 1.9-5.1 1.9L11 17.5l-1.9-5.1L4 10.5l5.1-1.9L11 3.5zM18.5 15.5v5M16 18h5" />,
+  back: <path d="M19 12H5M11 6l-6 6 6 6" />,
+  forward: <path d="M5 12h14M13 6l6 6-6 6" />,
   send: <path d="M12 19V5.5M6 11.5l6-6 6 6" />,
 } satisfies Record<string, ReactNode>;
 
