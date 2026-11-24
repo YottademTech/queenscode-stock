@@ -62,7 +62,8 @@ export type CountAction =
   | { type: 'readingFailed'; photoId: string; message: string; retryable: boolean }
   | { type: 'photoRetried'; photoId: string }
   | { type: 'photoRemoved'; photoId: string }
-  | { type: 'rowAdded'; rowId: string; location: string }
+  /** A row the counter filled in by hand. */
+  | { type: 'rowAdded'; row: CountRow }
   | { type: 'rowDetailsChanged'; rowId: string; change: Partial<RowDetails> }
   | { type: 'rowQuantitiesChanged'; rowId: string; change: Partial<Quantities> }
   | { type: 'rowRemoved'; rowId: string }
@@ -123,16 +124,7 @@ export function countReducer(state: CountState, action: CountAction): CountState
       };
 
     case 'rowAdded':
-      return {
-        ...state,
-        rows: [
-          ...state.rows,
-          {
-            id: action.rowId, photoId: null, location: action.location, productCode: null, newProduct: emptyDetails(),
-            fullCartons: 0, packSize: null, loosePieces: 0, confidence: 'High', note: '', saving: false,
-          },
-        ],
-      };
+      return { ...state, rows: [...state.rows, action.row] };
 
     case 'rowDetailsChanged':
       return withRows(state, [action.rowId], (row) => ({ ...row, ...action.change }));
@@ -175,6 +167,14 @@ function withRows(state: CountState, rowIds: readonly string[], change: (row: Co
 
 // --- What a row means ------------------------------------------------------
 
+/** An empty row for the counter to fill in by hand: counted by a person, so High confidence. */
+export function handRow(id: string, location: string): CountRow {
+  return {
+    id, photoId: null, location, productCode: null, newProduct: emptyDetails(),
+    fullCartons: 0, packSize: null, loosePieces: 0, confidence: 'High', note: '', saving: false,
+  };
+}
+
 /** Claude's reading of one photo, as rows for the place where the photo was taken. */
 export function rowsFromAnalysis(photo: Photo, analysis: CountAnalysis, nextId: () => string): CountRow[] {
   return analysis.items.map((item) => ({
@@ -212,18 +212,6 @@ export function rowProblems(row: CountRow, products: readonly Product[], unit: C
   if (row.productCode !== null && !product) problems.push('This product is no longer in the Sheet. Choose it again.');
   if (row.fullCartons > 0 && !packSizeFor(row, product)) problems.push(`Enter the pieces per ${unit.one}.`);
   return problems;
-}
-
-/**
- * Whether a row Claude just returned can go to the Sheet without a person. It cannot when only a
- * person knows the missing fact: how many pieces are in a closed bag or sack, or what a product is.
- * A product code is trusted here even if this phone's product list is a moment out of date,
- * because the server chose it and checks it again on save.
- */
-export function canSaveUnattended(row: CountRow, products: readonly Product[]): boolean {
-  const knowsPackSize = row.fullCartons === 0 || packSizeFor(row, findProduct(products, row.productCode)) !== null;
-  const knowsProduct = row.productCode !== null || detailProblems(row.newProduct).length === 0;
-  return knowsPackSize && knowsProduct;
 }
 
 export function savedCount(row: CountRow, products: readonly Product[], waitingForSignal: boolean): SavedCount {

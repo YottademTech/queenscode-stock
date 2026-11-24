@@ -63,7 +63,19 @@ plus loose pieces. The workbook ships with "Warehouse boxes" in B5: change it if
 
 ## Logo
 
-Save the logo as `web/src/assets/logo.png` (or .jpg, .webp, .svg) and it appears in the top bar.
+Save the logo as `web/src/assets/logo.png` (or .jpg, .webp, .svg) and it appears at the top of the
+side panel, shown whole and up to 10rem tall. The side panel opens from the menu button at the top right
+and also holds **Sign out**.
+
+## Signing in
+
+The app opens on a sign-in screen where the counter picks their name from a list and types a 4-digit code (`4444` for
+now, set as `ACCESS_CODE` in `web/src/SignIn.tsx`). The names, each with its own colour, are the `STAFF` list in the same file: add or remove a
+person there and push. A phone signed in under a name that is no longer listed is asked again.
+The phone remembers the sign-in; changing the
+code and pushing asks every phone for the new one. The name is saved with every count. The code is
+part of the app every phone downloads, so it keeps out a passer-by, not a determined person: the app
+secret checked by the Apps Script is what protects the Sheet.
 
 ## Secrets
 
@@ -130,10 +142,9 @@ the same.
   The app refuses a save that would not fit. Clear old Claude_Counts rows between stocktakes.
 - **Stocktake date.** Counts are filed under Settings!B3. Change it in the Sheet to start a new
   stocktake; the app warns when it is not today.
-- **Snap and move on.** With "Save counts as they come in" on (the default), each photo is counted
-  in the background and saved without a tap. A row is held for the counter only when something is
-  missing that a photo cannot show, such as the pieces in a closed sack. Low-confidence rows are
-  saved and flagged CHECK on the Stock screen. Turn the switch off to review every row first.
+- **Check, then save.** Each photo is counted in the background while you take the next one. Every
+  row Claude returns waits on the Photo screen until you check it and tap Save, so nothing reaches
+  the Sheet unseen. Low-confidence rows are flagged CHECK on the Stock screen once saved.
 - **In-app camera.** "Take photos" opens a camera that stays open between shots. Browsers only
   allow it on https (or localhost); elsewhere the card opens the phone's own camera instead.
 - **Counting twice adds up.** Two saved photo counts of the same product and place are summed.

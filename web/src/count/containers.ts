@@ -24,5 +24,5 @@ export function countingHint(location: string): string {
   const container = containerAt(location);
   return container
     ? `Count the full ${container.many}, enter the pieces per ${container.one}, then add any loose pieces.`
-    : 'Count the single pieces you can see.';
+    : '';
 }

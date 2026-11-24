@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { CountAnalysis, Product } from '../api/contract';
 import { emptyDetails } from '../products/details';
 import {
-  canSaveUnattended, countReducer, detailsToFill, emptyCount, groupByLocation, photoCount, rowProblems, rowsFromAnalysis, rowsPerProduct,
+  countReducer, handRow, detailsToFill, emptyCount, groupByLocation, photoCount, rowProblems, rowsFromAnalysis, rowsPerProduct,
   savedCount, toCountRowInput, totalPieces, type CountRow, type CountState, type Photo,
 } from './countState';
 
@@ -55,7 +55,7 @@ describe('counting from photos', () => {
   });
 
   it('removes a photo together with the rows read from it, and ignores a late answer for it', () => {
-    let state = countReducer(reviewed(), { type: 'rowAdded', rowId: 'manual', location: 'Shop shelf' });
+    let state = countReducer(reviewed(), { type: 'rowAdded', row: handRow('manual', 'Shop shelf') });
     state = countReducer(state, { type: 'photoRemoved', photoId: 'p1' });
     expect(state.photos).toEqual([]);
     expect(state.rows.map((row) => [row.id, row.location])).toEqual([['manual', 'Shop shelf']]);
@@ -116,23 +116,7 @@ describe('counting from photos', () => {
   });
 });
 
-describe('saving without the counter waiting', () => {
-  it('saves a row unattended only when nothing is missing that a person has to supply', () => {
-    const [sackRow, newRow] = reviewed().rows;
-
-    expect(canSaveUnattended(newRow!, [])).toBe(true);
-    expect(canSaveUnattended({ ...newRow!, newProduct: emptyDetails() }, [])).toBe(false);
-
-    // Two full sacks: only countable when the pieces per sack are known.
-    expect(canSaveUnattended(sackRow!, [product()])).toBe(true);
-    expect(canSaveUnattended(sackRow!, [product({ packSize: null })])).toBe(false);
-    expect(canSaveUnattended({ ...sackRow!, packSize: 50 }, [product({ packSize: null })])).toBe(true);
-
-    // A code the server just returned is trusted even if this phone has not reloaded its list yet.
-    expect(canSaveUnattended({ ...sackRow!, fullCartons: 0 }, [])).toBe(true);
-    expect(canSaveUnattended(sackRow!, [])).toBe(false);
-  });
-
+describe('saving', () => {
   it('hides rows while they are being saved and brings them back for the counter if the save is refused', () => {
     let state = countReducer(reviewed(), { type: 'savingStarted', rowIds: ['r1'] });
     expect(state.rows.map((row) => row.saving)).toEqual([true, false]);

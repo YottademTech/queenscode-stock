@@ -10,7 +10,7 @@ import { CameraSheet, canUseCamera } from './CameraSheet';
 import { CountRowCard } from './CountRowCard';
 import { ANY_PACK, containerAt, countingHint } from './containers';
 import {
-  canSaveUnattended, countReducer, emptyCount, groupByLocation, photoCount, rowProblems, rowsFromAnalysis, rowsPerProduct, savedCount,
+  countReducer, handRow, emptyCount, groupByLocation, photoCount, rowProblems, rowsFromAnalysis, rowsPerProduct, savedCount,
   toCountRowInput, type CountRow, type Photo,
 } from './countState';
 
@@ -21,7 +21,6 @@ const AUTO_RETRY_MS = 15_000;
 /** Failures that pass on their own: no signal, a busy server, Claude overloaded. */
 const PASSING_FAILURES = new Set(['network', 'busy', 'claude_unavailable', 'service_unavailable']);
 
-const AUTO_SAVE_KEY = 'stock.autosave';
 const PHOTO_SETS_KEY = 'stock.photosets';
 
 /** An on/off choice the counter made earlier on this phone. */
@@ -49,28 +48,22 @@ type CountFlowProps = { bootstrap: Bootstrap; counter: string; onSaved: () => vo
 export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
   const [state, dispatch] = useReducer(countReducer, emptyCount);
   const [location, setLocation] = useState(bootstrap.locations[0] ?? '');
-  const [autoSave, setAutoSave] = useState(() => rememberedChoice(AUTO_SAVE_KEY, true));
   const [photoSets, setPhotoSets] = useState(() => rememberedChoice(PHOTO_SETS_KEY, false));
   const [cameraOpen, setCameraOpen] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  // The row being filled in by hand, in the panel on the right. It joins the list only when added.
+  const [handDraft, setHandDraft] = useState<CountRow | null>(null);
+  const handPanel = useRef<HTMLDialogElement>(null);
   const startedPhotoIds = useRef(new Set<string>());
   const requestIds = useRef(createRequestIds()).current;
 
-  // Answers from Claude arrive seconds after the request was sent. This keeps what the reply
-  // handler needs (who is counting, the product list, whether to save unattended) up to date.
-  const latest = useRef({ autoSave, counter, products: bootstrap.products, onSaved });
-  useEffect(() => {
-    latest.current = { autoSave, counter, products: bootstrap.products, onSaved };
-  });
-
   async function saveRows(rows: readonly CountRow[], place: string, requestId: string): Promise<boolean> {
-    const { counter: who, products, onSaved: afterSave } = latest.current;
     const rowIds = rows.map((row) => row.id);
     const outcome = await submitSave({
       kind: 'counts',
       id: requestId,
       label: `${plural(rows.length, 'photo count row', 'photo count rows')} for ${place}`,
-      payload: { requestId, location: place, counter: who.trim(), rows: rows.map(toCountRowInput) },
+      payload: { requestId, location: place, counter: counter.trim(), rows: rows.map(toCountRowInput) },
       lastError: null,
     });
 
@@ -80,8 +73,8 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
       setNotice({ tone: 'error', text: outcome.message });
       return false;
     }
-    dispatch({ type: 'rowsSaved', rowIds, saved: rows.map((row) => savedCount(row, products, outcome.kind === 'queued')) });
-    afterSave();
+    dispatch({ type: 'rowsSaved', rowIds, saved: rows.map((row) => savedCount(row, bootstrap.products, outcome.kind === 'queued')) });
+    onSaved();
     return true;
   }
 
@@ -101,14 +94,8 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
         return;
       }
 
-      const rows = rowsFromAnalysis(next, result.data, newId);
-      const { autoSave: unattended, counter: who, products } = latest.current;
-      // Decided once, as the rows arrive. A row held back is only ever saved by the counter's own tap.
-      const ready = unattended && who.trim() !== '' ? rows.filter((row) => canSaveUnattended(row, products)) : [];
-      const readyIds = new Set(ready.map((row) => row.id));
-
-      dispatch({ type: 'readingSucceeded', photoId: next.id, note: result.data.photoNote, rows: rows.map((row) => ({ ...row, saving: readyIds.has(row.id) })) });
-      if (ready.length > 0) void saveRows(ready, next.location, newId());
+      // Every row waits for the counter to check it and tap Save.
+      dispatch({ type: 'readingSucceeded', photoId: next.id, note: result.data.photoNote, rows: rowsFromAnalysis(next, result.data, newId) });
     });
   }, [state.photos]);
 
@@ -152,7 +139,7 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
   ].filter(Boolean).join(' · ');
 
   const blockers: string[] = [];
-  if (counter.trim() === '') blockers.push('Enter your name at the top.');
+  if (counter.trim() === '') blockers.push('Sign in again with your name.');
   if (rowsWithProblems > 0) blockers.push(`Fix ${plural(rowsWithProblems, 'row', 'rows')} marked below.`);
 
   const alreadyCounted = (row: CountRow) =>
@@ -191,11 +178,6 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
     }
   };
 
-  const handleAutoSaveChange = (enabled: boolean) => {
-    setAutoSave(enabled);
-    rememberChoice(AUTO_SAVE_KEY, enabled);
-  };
-
   const closeOpenSet = () => dispatch({ type: 'openSetClosed' });
 
   const handlePhotoSetsChange = (enabled: boolean) => {
@@ -211,6 +193,20 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
     setCameraOpen(false);
   };
 
+  // The panel opens once its row exists, so the form inside it is there to receive the focus.
+  useEffect(() => {
+    if (handDraft && !handPanel.current?.open) handPanel.current?.showModal();
+  }, [handDraft]);
+
+  const closeHandPanel = () => handPanel.current?.close();
+  const handDraftProblems = handDraft ? rowProblems(handDraft, bootstrap.products, containerAt(handDraft.location) ?? ANY_PACK) : [];
+
+  const addHandRow = () => {
+    if (!handDraft || handDraftProblems.length > 0) return;
+    dispatch({ type: 'rowAdded', row: handDraft });
+    closeHandPanel();
+  };
+
   const handleSave = async () => {
     setNotice(null);
     const groups = [...groupByLocation(reviewRows)];
@@ -224,17 +220,11 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
 
   return (
     <section aria-labelledby="count-heading">
-      <h2 id="count-heading">Count by photo</h2>
+      <h2 id="count-heading">Take Stock By Photo</h2>
 
-      <SelectField label="Where are you counting?" value={location} options={bootstrap.locations} onChange={setLocation} />
-      <p className="hint">{countingHint(location)}</p>
+      <SelectField label="Where are you counting from?" value={location} options={bootstrap.locations} onChange={setLocation} />
+      {countingHint(location) && <p className="hint">{countingHint(location)}</p>}
 
-      <SwitchField
-        label="Save counts as they come in"
-        hint="Take a photo and move on. Only rows that need you are held back."
-        checked={autoSave}
-        onChange={handleAutoSaveChange}
-      />
       {setLimit > 1 && (
         <SwitchField
           label="Add front and back photos"
@@ -243,7 +233,6 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
           onChange={handlePhotoSetsChange}
         />
       )}
-      {autoSave && counter.trim() === '' && <p className="hint warn">Enter your name at the top, or counts will wait here for you to save them.</p>}
 
       <details className="tips">
         <summary>How to take a photo Claude can count</summary>
@@ -332,12 +321,8 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
 
       {reviewRows.length > 0 && (
         <>
-          <h3>{autoSave ? 'Needs you' : 'Check the count before saving'}</h3>
-          <p className="hint">
-            {autoSave
-              ? 'These were not saved, because something is missing that only you know. Fill it in and save.'
-              : 'Nothing here is saved yet. Correct any number that is wrong, then save.'}
-          </p>
+          <h3>Check the count before saving</h3>
+          <p className="hint">Nothing here is saved yet. Correct any number that is wrong, then save.</p>
           <ul className="row-list">
             {reviewRows.map((row, index) => (
               <CountRowCard
@@ -359,11 +344,74 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
       )}
 
       <div className="button-row">
-        <button type="button" className="button" onClick={() => dispatch({ type: 'rowAdded', rowId: newId(), location })}>
-          <Icon name="plus" />
-          Add a row by hand
+        <button
+          type="button"
+          className="button icon-button"
+          aria-label="Add a row by hand"
+          title="Add a row by hand"
+          aria-haspopup="dialog"
+          onClick={() => setHandDraft(handRow(newId(), location))}
+        >
+          <Icon name="handPlus" size={28} />
         </button>
       </div>
+
+      {/* Filling in a row by hand happens in a panel from the right, so the list stays as it was until
+          the row is added. Closing it any way (X, Escape, a tap beside it) drops the unfinished row. */}
+      <dialog
+        ref={handPanel}
+        className="drawer-right"
+        aria-labelledby="hand-panel-title"
+        onClose={() => setHandDraft(null)}
+        onClick={(event) => { if (event.target === event.currentTarget) closeHandPanel(); }}
+      >
+        {handDraft && (
+          <div className="drawer-panel">
+            <div className="drawer-head">
+              <h3 id="hand-panel-title">Add a row by hand</h3>
+              <button type="button" className="drawer-close" aria-label="Close without adding" onClick={closeHandPanel}>
+                <Icon name="close" size={22} />
+              </button>
+            </div>
+            <div className="drawer-body">
+            <p className="hint">Choose the product and enter what you counted at {handDraft.location}. The row joins the list on the Photo screen, to be saved with the others.</p>
+            <ul className="row-list">
+              <CountRowCard
+                row={handDraft}
+                position={reviewRows.length + 1}
+                products={bootstrap.products}
+                photoPreviewUrl={null}
+                problems={handDraftProblems}
+                alreadyCounted={alreadyCounted(handDraft)}
+                rowsForSameProduct={rowsPerProduct([...reviewRows, handDraft])(handDraft)}
+                onDetailsChange={(change) => setHandDraft((current) => (current ? { ...current, ...change } : current))}
+                onQuantitiesChange={(change) => setHandDraft((current) => (current ? { ...current, ...change } : current))}
+                onRemove={closeHandPanel}
+                showHead={false}
+              />
+            </ul>
+            </div>
+            {/* A footer of its own under the form, so the button never covers a field. */}
+            <div className="drawer-foot">
+              {handDraftProblems.length > 0 && (
+                <ul className="problems" id="hand-panel-problems">
+                  {handDraftProblems.map((problem) => <li key={problem}>{problem}</li>)}
+                </ul>
+              )}
+              <button
+                type="button"
+                className="button primary wide"
+                disabled={handDraftProblems.length > 0}
+                aria-describedby={handDraftProblems.length > 0 ? 'hand-panel-problems' : undefined}
+                onClick={addHandRow}
+              >
+                <Icon name="plus" />
+                Add to the list
+              </button>
+            </div>
+          </div>
+        )}
+      </dialog>
 
       {reviewRows.length > 0 && (
         <div className="save-bar">

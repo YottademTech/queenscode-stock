@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { api, isConfigured } from './api/client';
 import type { Bootstrap } from './api/contract';
 import { CountFlow } from './count/CountFlow';
@@ -6,6 +6,7 @@ import { HandCountFlow } from './handcount/HandCountFlow';
 import { formatDay } from './lib/day';
 import { outbox } from './lib/saves';
 import { ProductsFlow } from './products/ProductsFlow';
+import { SignIn, rememberedSignIn, signOut } from './SignIn';
 import { StockFlow } from './stock/StockFlow';
 import { Icon } from './shared/Icon';
 
@@ -23,22 +24,14 @@ type ScreenId = (typeof SCREENS)[number]['id'];
 const logoFiles = import.meta.glob<string>('./assets/logo.{png,jpg,jpeg,webp,svg}', { eager: true, import: 'default' });
 const logoUrl: string | undefined = Object.values(logoFiles)[0];
 
-const COUNTER_KEY = 'stock.counter';
-
-function rememberedCounter(): string {
-  try {
-    return window.localStorage.getItem(COUNTER_KEY) ?? '';
-  } catch {
-    return '';
-  }
-}
-
 export function App() {
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
   const [screen, setScreen] = useState<ScreenId>('photo');
-  const [counter, setCounter] = useState(rememberedCounter);
+  // The counter's name, given at sign-in. Every count and hand count is saved with it.
+  const [counter, setCounter] = useState(() => rememberedSignIn()?.name ?? null);
   const [isSending, setIsSending] = useState(false);
   const waitingSaves = useSyncExternalStore(outbox.subscribe, outbox.getSnapshot);
+  const menu = useRef<HTMLDialogElement>(null);
 
   const reload = useCallback(async () => {
     const result = await api.bootstrap();
@@ -65,13 +58,11 @@ export function App() {
     return () => window.removeEventListener('online', sendWaitingSaves);
   }, [sendWaitingSaves]);
 
-  const handleCounterChange = (name: string) => {
-    setCounter(name);
-    try {
-      window.localStorage.setItem(COUNTER_KEY, name);
-    } catch {
-      // The name is still kept for this session.
-    }
+  const handleSignOut = () => {
+    menu.current?.close();
+    signOut();
+    setCounter(null);
+    setScreen('photo');
   };
 
   const handleScreenChange = (next: ScreenId) => {
@@ -87,10 +78,8 @@ export function App() {
   if (!isConfigured) {
     return (
       <div className="app">
-        <header className="app-bar">
-          <h1>QueensCode</h1>
-        </header>
         <div className="page">
+          <h1 className="brand-name">QueensCode</h1>
           <p className="notice error" role="alert">
             The app is not connected to a Sheet yet. Set VITE_API_URL and VITE_APP_SECRET in the project's .env file, then restart.
           </p>
@@ -99,37 +88,35 @@ export function App() {
     );
   }
 
+  if (counter === null) return <SignIn logoUrl={logoUrl} onSignIn={setCounter} />;
+
   return (
     <div className="app">
-      <header className="app-bar">
-        <div className="brand">
-          {logoUrl && <img src={logoUrl} alt="" className="brand-logo" />}
-          <div>
-            <h1>QueensCode</h1>
-            <p className="stocktake">
-              {load.kind === 'ready' ? (
-                <>
-                  Stocktake <strong>{formatDay(load.bootstrap.countDate)}</strong>
-                </>
-              ) : (
-                'Stock count'
-              )}
-            </p>
+      <h1 className="visually-hidden">QueensCode stock count</h1>
+      <button type="button" className="menu-button" aria-label="Open the menu" onClick={() => menu.current?.showModal()}>
+        <Icon name="menu" size={24} />
+      </button>
+
+      {/* The brand lives in a side panel, so the page has the whole screen.
+          A click that lands on the dialog itself is a click on the dimmed area beside the panel. */}
+      <dialog ref={menu} className="sidebar" aria-label="Menu" onClick={(event) => { if (event.target === event.currentTarget) event.currentTarget.close(); }}>
+        <div className="sidebar-panel">
+          <div className="brand">
+            {/* The logo carries the shop's name, so the lettering is only shown when there is no logo file. */}
+            {logoUrl && <img src={logoUrl} alt="QueensCode Beauty Haven" className="brand-logo" />}
+            {!logoUrl && <p className="brand-name">QueensCode</p>}
           </div>
+
+          <button type="button" className="sidebar-sign-out" onClick={handleSignOut}>
+            <Icon name="back" size={20} />
+            Sign out
+          </button>
         </div>
-        <div className="counter">
-          <label htmlFor="counter-name" className="visually-hidden">Your name</label>
-          <input
-            id="counter-name"
-            type="text"
-            autoComplete="name"
-            placeholder="Your name"
-            value={counter}
-            maxLength={40}
-            onChange={(event) => handleCounterChange(event.target.value)}
-          />
-        </div>
-      </header>
+        {/* Takes the menu button's place at the top right while the panel is open. */}
+        <button type="button" className="sidebar-close" aria-label="Close the menu" onClick={() => menu.current?.close()}>
+          <Icon name="close" size={24} />
+        </button>
+      </dialog>
 
       <div className="page">
         {load.kind === 'ready' && load.bootstrap.countDate !== load.bootstrap.today && (

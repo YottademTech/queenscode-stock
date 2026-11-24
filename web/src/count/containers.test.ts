@@ -15,7 +15,8 @@ describe('how stock is kept at a place', () => {
   });
 
   it('tells the counter what to count there', () => {
-    expect(countingHint('Shop shelf')).toBe('Count the single pieces you can see.');
+    // A shelf needs no instructions: it is single pieces.
+    expect(countingHint('Shop shelf')).toBe('');
     expect(countingHint('Warehouse sacks')).toBe('Count the full sacks, enter the pieces per sack, then add any loose pieces.');
   });
 });

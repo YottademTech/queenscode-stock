@@ -61,7 +61,7 @@ body { margin: 0; background: radial-gradient(60rem 40rem at 50% -10%, #2b2618, 
 /* One phone-width column, also on a laptop, so the app looks the same everywhere. */
 .app {
   position: relative; max-width: var(--app-width); margin: 0 auto; min-height: 100vh; min-height: 100dvh;
-  /* A breath of gold under the header, fading into the page. */
+  /* A breath of gold at the top, fading into the page. */
   background: radial-gradient(90% 16rem at 50% 0, rgb(212 175 55 / 0.2), transparent) no-repeat, var(--page);
 }
 /* Content fades out behind the floating navigation instead of being cut off by it. */
@@ -72,7 +72,8 @@ body { margin: 0; background: radial-gradient(60rem 40rem at 50% -10%, #2b2618, 
 }
 
 .page {
-  padding: 1rem max(var(--gutter), env(safe-area-inset-right)) calc(var(--dock-top) + 2.25rem) max(var(--gutter), env(safe-area-inset-left));
+  /* The top leaves room for the menu button, so it covers nothing before the page is scrolled. */
+  padding: calc(4.5rem + env(safe-area-inset-top, 0px)) max(var(--gutter), env(safe-area-inset-right)) calc(var(--dock-top) + 2.25rem) max(var(--gutter), env(safe-area-inset-left));
   overflow-wrap: anywhere;
 }
 
@@ -86,36 +87,134 @@ h3 { font-size: 1.2rem; margin: 1.5rem 0 0.3rem; }
 p { margin: 0.45rem 0; }
 ul { margin: 0; padding: 0; list-style: none; }
 
-.app-bar {
-  position: sticky; top: 0; z-index: 3;
-  display: grid; grid-template-columns: 1fr minmax(7.5rem, 40%); gap: 0.75rem; align-items: center;
-  padding: calc(0.8rem + env(safe-area-inset-top)) max(var(--gutter), env(safe-area-inset-right)) 0.95rem max(var(--gutter), env(safe-area-inset-left));
-  color: #fff;
-  background:
-    radial-gradient(120% 150% at 0% 0%, rgb(212 175 55 / 0.26), transparent 55%),
-    radial-gradient(80% 130% at 100% 110%, rgb(212 175 55 / 0.14), transparent 60%),
-    var(--black);
-  /* The header curves into the page instead of ending on a ruled line. */
-  border-radius: 0 0 var(--round-l) var(--round-l);
-  box-shadow: 0 14px 30px -18px rgb(0 0 0 / 0.7);
+/* The menu button floats at the top right and opens the side panel on the left. Nothing else is pinned to
+   the top. While the panel is open, its close button takes the same place, so the button seems to turn into an X. */
+.menu-button, .sidebar-close {
+  position: fixed; z-index: 3; top: calc(0.75rem + env(safe-area-inset-top, 0px));
+  right: max(calc(var(--dock-inset) + env(safe-area-inset-right, 0px)), calc(50% - var(--app-width) / 2 + var(--dock-inset)));
+  display: inline-flex; align-items: center; justify-content: center; width: 3rem; height: 3rem; border-radius: 50%; cursor: pointer;
+  border: 0; color: var(--gold-bright); background: rgb(11 11 12 / 0.94);
+  box-shadow: 0 14px 26px -12px rgb(0 0 0 / 0.75), inset 0 0 0 1px rgb(247 224 138 / 0.28);
+  transition: transform 0.18s var(--ease);
 }
-.brand { display: flex; align-items: center; gap: 0.65rem; min-width: 0; }
-.brand-logo { width: 2.75rem; height: 2.75rem; border-radius: 0.85rem; object-fit: cover; flex: none; box-shadow: 0 0 0 1px rgb(247 224 138 / 0.4); }
-.app-bar h1 {
+.menu-button:active, .sidebar-close:active { transform: scale(0.92); }
+.menu-button:focus-visible { outline-color: var(--gold-deep); }
+.sidebar[open] .sidebar-close { animation: turn-in 0.28s var(--ease); }
+@keyframes turn-in { from { transform: rotate(-90deg); opacity: 0.4; } }
+
+/* The side panel: a native dialog over the whole screen, transparent except for the drawer on the left.
+   A tap that lands on the dialog itself, beside the drawer, closes it. */
+.sidebar {
+  position: fixed; inset: 0; margin: 0; padding: 0; border: 0; width: 100%; height: 100%; max-width: none; max-height: none;
+  overflow: hidden; color: #fff; background: transparent;
+}
+.sidebar::backdrop { background: rgb(11 11 12 / 0.5); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+.sidebar-panel {
+  /* Narrow enough to stay clear of the close button at the top right. */
+  width: min(19rem, calc(100vw - 4.5rem)); height: 100%;
+  display: flex; flex-direction: column; gap: 1.5rem; overflow-y: auto; overscroll-behavior: contain;
+  padding: 0 0 calc(1rem + env(safe-area-inset-bottom, 0px));
+  background:
+    radial-gradient(120% 60% at 0% 0%, rgb(212 175 55 / 0.26), transparent 55%),
+    radial-gradient(90% 50% at 100% 100%, rgb(212 175 55 / 0.14), transparent 60%),
+    var(--black);
+  border-radius: 0 var(--round-l) var(--round-l) 0;
+  box-shadow: 18px 0 40px -18px rgb(0 0 0 / 0.8);
+}
+.sidebar[open] .sidebar-panel { animation: sidebar-in 0.28s var(--ease); }
+@keyframes sidebar-in { from { transform: translateX(-100%); } }
+/* The logo runs edge to edge across the top of the drawer, at its own shape. */
+.brand { display: flex; flex-direction: column; align-items: stretch; min-width: 0; }
+.brand-logo { display: block; width: 100%; height: auto; border-radius: 0 var(--round-l) 0 0; }
+.sidebar .brand-name { margin: calc(1.25rem + env(safe-area-inset-top, 0px)) 1rem 0 max(1rem, env(safe-area-inset-left, 0px)); }
+.brand-name {
   /* Serif capitals with wide spacing, after the QueensCode logo lettering. */
-  font-family: Georgia, 'Times New Roman', serif; font-size: clamp(1rem, 4.6vw, 1.15rem); font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; width: fit-content;
+  margin: 0; font-family: Georgia, 'Times New Roman', serif; font-size: 1.2rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; width: fit-content;
   /* The title is painted with the gold gradient; plain gold is the fallback colour. */
   color: var(--gold); background: var(--gold-shine) 0 0 / 220% 100%; -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
   animation: sparkle 6s ease-in-out infinite alternate;
 }
 @keyframes sparkle { to { background-position: 100% 0; } }
-.stocktake { color: #cfc8b4; font-size: 0.8rem; margin: 0.1rem 0 0; }
-.stocktake strong { white-space: nowrap; color: var(--gold-bright); }
-.app-bar .counter input[type='text'] {
-  min-height: 2.75rem; padding-inline: 1rem; border-radius: 10rem;
-  background: rgb(255 255 255 / 0.08); color: #fff; border-color: rgb(247 224 138 / 0.55);
+.sidebar-panel .sidebar-sign-out { margin: auto 1rem 0 max(1rem, env(safe-area-inset-left, 0px)); }
+.sidebar-sign-out {
+  font: inherit; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; min-height: 3rem; padding: 0 1.25rem;
+  color: #fff; background: rgb(255 255 255 / 0.1); border: 1px solid rgb(247 224 138 / 0.4); border-radius: 10rem; cursor: pointer;
 }
-.app-bar .counter input::placeholder { color: #c3bba5; opacity: 1; }
+
+/* A panel from the right, for filling in a row by hand: a native dialog over the whole screen,
+   transparent except for the panel. A tap that lands on the dialog itself, beside the panel, closes it. */
+.drawer-right {
+  position: fixed; inset: 0; margin: 0; padding: 0; border: 0; width: 100%; height: 100%; max-width: none; max-height: none;
+  overflow: hidden; background: transparent; color: var(--ink);
+}
+.drawer-right::backdrop { background: rgb(11 11 12 / 0.5); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+.drawer-panel {
+  margin-left: auto; width: min(28rem, calc(100vw - 2.5rem)); height: 100%; display: flex; flex-direction: column;
+  background: var(--page); border-radius: var(--round-l) 0 0 var(--round-l); box-shadow: -18px 0 40px -18px rgb(0 0 0 / 0.6);
+}
+/* Title and footer stay put; only the form between them scrolls. */
+.drawer-head, .drawer-body, .drawer-foot { padding-left: var(--gutter); padding-right: max(var(--gutter), env(safe-area-inset-right, 0px)); }
+.drawer-head { padding-top: calc(0.9rem + env(safe-area-inset-top, 0px)); padding-bottom: 0.4rem; }
+.drawer-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.drawer-foot { padding-top: 0.75rem; padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--hairline); background: var(--surface); border-radius: 0 0 0 var(--round-l); }
+.drawer-foot .problems { margin: 0 0.4rem 0.6rem; }
+/* Inside the panel the form needs no card of its own. */
+.row-card.bare { padding: 0; background: transparent; box-shadow: none; animation: none; }
+.row-card.bare::before { content: none; }
+.drawer-right[open] .drawer-panel { animation: drawer-in 0.28s var(--ease); }
+@keyframes drawer-in { from { transform: translateX(100%); } }
+.drawer-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+.drawer-head h3 { margin: 0; }
+.drawer-close {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; width: 2.75rem; height: 2.75rem; border-radius: 50%; cursor: pointer;
+  color: var(--gold-bright); background: var(--black); border: 0; box-shadow: inset 0 0 0 1px rgb(247 224 138 / 0.3);
+}
+
+/* Sign-in: a black full screen with the logo, the counter's name and the code. */
+.sign-in {
+  position: fixed; inset: 0; z-index: 20; overflow-y: auto; color: #fff; display: flex; justify-content: center; align-items: center;
+  padding: calc(1.5rem + env(safe-area-inset-top, 0px)) var(--gutter) calc(1.5rem + env(safe-area-inset-bottom, 0px));
+  background:
+    radial-gradient(90% 45% at 50% 0%, rgb(212 175 55 / 0.22), transparent 60%),
+    radial-gradient(80% 40% at 50% 100%, rgb(212 175 55 / 0.12), transparent 60%),
+    var(--black);
+}
+.sign-in-panel { width: 100%; max-width: 21rem; display: flex; flex-direction: column; align-items: stretch; gap: 1.1rem; margin: auto 0; }
+.sign-in-logo { display: block; align-self: center; width: min(13rem, 62vw, 30dvh); height: auto; border-radius: 1.25rem; box-shadow: 0 0 0 1px rgb(247 224 138 / 0.25), 0 22px 40px -22px rgb(212 175 55 / 0.6); }
+.sign-in .brand-name { align-self: center; font-size: 1.6rem; }
+.sign-in-title { margin: 0; text-align: center; font-family: Georgia, 'Times New Roman', serif; font-size: 1.35rem; color: var(--gold-bright); letter-spacing: 0.04em; }
+.sign-in-label, .sign-in-code legend { display: block; margin-bottom: 0.4rem; font-size: 0.95rem; font-weight: 600; color: #e9e2cd; }
+.name-picker { display: flex; flex-direction: column; }
+.name-toggle {
+  font: inherit; font-size: 1.05rem; width: 100%; min-height: 3.1rem; padding: 0 1rem 0 1.1rem; display: flex; align-items: center; gap: 0.75rem;
+  border-radius: 10rem; background: rgb(255 255 255 / 0.08); color: #fff; border: 1px solid rgb(247 224 138 / 0.55); cursor: pointer; text-align: left;
+}
+.name-toggle[aria-expanded='true'] { border-color: var(--gold-bright); }
+.name-value { flex: 1; display: flex; align-items: center; gap: 0.65rem; min-width: 0; }
+.name-placeholder { color: #c3bba5; }
+.name-chevron { flex: none; width: 0.55rem; height: 0.55rem; margin: -0.2rem 0.25rem 0 0; border-right: 2px solid var(--gold-bright); border-bottom: 2px solid var(--gold-bright); transform: rotate(45deg); transition: transform 0.2s var(--ease); }
+.name-toggle[aria-expanded='true'] .name-chevron { transform: translateY(0.25rem) rotate(-135deg); }
+.name-swatch { flex: none; width: 1rem; height: 1rem; border-radius: 50%; box-shadow: 0 0 0 2px rgb(255 255 255 / 0.85); }
+.name-options {
+  margin-top: 0.5rem; padding: 0.35rem; border-radius: 1.25rem; background: #1a1a1c; border: 1px solid rgb(247 224 138 / 0.35);
+  box-shadow: 0 18px 34px -16px rgb(0 0 0 / 0.9); animation: rise 0.2s var(--ease) backwards;
+}
+.name-option {
+  font: inherit; font-size: 1.02rem; width: 100%; min-height: 2.9rem; padding: 0 0.85rem; display: flex; align-items: center; gap: 0.75rem;
+  background: transparent; color: #fff; border: 0; border-radius: 0.95rem; cursor: pointer; text-align: left;
+}
+.name-option .icon { margin-left: auto; color: var(--gold-bright); }
+.name-option:hover, .name-option:focus-visible { background: rgb(255 255 255 / 0.08); }
+.name-option[aria-pressed='true'] { background: rgb(212 175 55 / 0.16); }
+.sign-in-code { margin: 0; }
+.code-boxes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.7rem; }
+.code-boxes input {
+  width: 100%; aspect-ratio: 1; max-height: min(4.5rem, 10dvh); padding: 0; text-align: center; font-size: 1.8rem; font-weight: 700; border-radius: 1rem;
+  background: rgb(255 255 255 / 0.08); color: var(--gold-bright); border: 1px solid rgb(247 224 138 / 0.55); caret-color: var(--gold-bright);
+}
+.sign-in :is(input):focus-visible { outline: 2px solid var(--gold-bright); outline-offset: 2px; border-color: var(--gold-bright); box-shadow: none; }
+.sign-in :focus-visible { outline-color: var(--gold-bright); }
+.sign-in-problem { margin: 0; min-height: 1.4rem; text-align: center; font-weight: 600; color: #ffb4a8; }
 
 /* The navigation floats above the page as a dock. */
 .bottom-nav {
@@ -168,7 +267,7 @@ legend + * { clear: both; }
 :is(input[type='text'], input[type='search'], select, textarea):focus-visible {
   outline: 2px solid var(--gold-deep); outline-offset: 0; border-color: var(--gold-deep); box-shadow: 0 0 0 0.3rem rgb(212 175 55 / 0.28);
 }
-.app-bar :focus-visible, .bottom-nav :focus-visible, .camera :focus-visible { outline-color: var(--gold-bright); }
+.sidebar :focus-visible, .bottom-nav :focus-visible, .camera :focus-visible { outline-color: var(--gold-bright); }
 
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 0.7rem; align-items: end; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 0.6rem; align-items: end; }
@@ -188,6 +287,8 @@ legend + * { clear: both; }
 /* Small buttons are narrower, not shorter than a thumb can hit reliably. */
 .button.small { min-height: 2.75rem; padding: 0.2rem 0.9rem; font-size: 0.9rem; }
 .button.wide { width: 100%; }
+/* A round button that shows only its icon; its name is in aria-label. */
+.button.icon-button, .button-row .button.icon-button { flex: none; width: 3.5rem; height: 3.5rem; min-height: 0; padding: 0; border-radius: 50%; }
 .button:active:not(:disabled) { transform: scale(0.97); }
 .button:disabled, .button.disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
 label.button:focus-within { outline: 3px solid var(--ink); outline-offset: 2px; }
@@ -361,8 +462,8 @@ details[open] > summary::after { transform: translateY(0.25rem) rotate(-135deg);
 .back-button:disabled, .photo-floats.disabled .float-button { opacity: 0.4; cursor: not-allowed; }
 .back-button:focus-visible { outline-color: var(--gold-deep); }
 .float-button:has(input:focus-visible) { outline: 2px solid var(--gold-deep); outline-offset: 2px; }
-/* The sticky header would otherwise cover the photo when the form scrolls to it. */
-.product-photo { scroll-margin-top: 6.5rem; }
+/* Clear of the menu button when the form scrolls to the photo. */
+.product-photo { scroll-margin-top: 4.5rem; }
 /* Room at the end of the details, so the last buttons can be scrolled clear of the back button. */
 .product-details { padding-bottom: 2.25rem; }
 
@@ -471,5 +572,5 @@ main > div:not([hidden]) > section.product-details { animation-name: fade-in; }
 
 /* A phone held sideways has little height: only the navigation stays pinned. */
 @media (max-height: 30rem) {
-  .app-bar, .save-bar { position: static; }
+  .save-bar { position: static; }
 }

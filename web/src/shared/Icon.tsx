@@ -13,14 +13,25 @@ const SHAPES = {
   trash: <path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 12.5h9l1-12.5M10 10.5v6M14 10.5v6" />,
   refresh: <path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4h-4" />,
   sparkle: <path d="M11 3.5l1.9 5.1 5.1 1.9-5.1 1.9L11 17.5l-1.9-5.1L4 10.5l5.1-1.9L11 3.5zM18.5 15.5v5M16 18h5" />,
+  menu: <path d="M4 7h16M4 12h16M4 17h16" />,
   back: <path d="M19 12H5M11 6l-6 6 6 6" />,
   forward: <path d="M5 12h14M13 6l6 6-6 6" />,
+  // An open hand with a plus at its fingertips: add something by hand.
+  handPlus: (
+    <>
+      <path d="M7 12V7.5a1.5 1.5 0 0 1 3 0V11" />
+      <path d="M10 11V6a1.5 1.5 0 0 1 3 0v5" />
+      <path d="M13 11V7.5a1.5 1.5 0 0 1 3 0v3.5" />
+      <path d="M16 11v-1a1.5 1.5 0 0 1 3 0v4.5a7 7 0 0 1-7 7h-.6a6 6 0 0 1-4.5-2.1l-3-3.5a1.6 1.6 0 0 1 2.4-2.1L7 15.4V12" />
+      <path d="M20 1.5v5M17.5 4h5" />
+    </>
+  ),
   send: <path d="M12 19V5.5M6 11.5l6-6 6 6" />,
 } satisfies Record<string, ReactNode>;
 
 export type IconName = keyof typeof SHAPES;
 
-/** Decorative only: every button keeps its text, so screen readers skip the icon. */
+/** Decorative only: a button shows text beside it or names itself with aria-label, so screen readers skip the icon. */
 export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
   return (
     <svg className="icon" viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">

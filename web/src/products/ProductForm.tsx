@@ -3,7 +3,7 @@ import { api } from '../api/client';
 import { DETAIL_KEYS, type Product, type ProductDetails } from '../api/contract';
 import { createRequestIds } from '../lib/id';
 import { PRODUCT_PHOTO_EDGE, driveThumbnail, preparePhoto, type PreparedPhoto } from '../lib/image';
-import { NoticeBox, NumberField, PhotoButtons, type Notice } from '../shared/fields';
+import { NoticeBox, NumberField, type Notice } from '../shared/fields';
 import { Icon } from '../shared/Icon';
 import { detailProblems, emptyDetails, pickDetails, trimDetails } from './details';
 import { ProductDetailFields } from './ProductDetailFields';
@@ -42,24 +42,19 @@ export function ProductForm({ product, countedPieces, canDelete, onDone, onCance
   const savedPhotoUrl = product ? driveThumbnail(product.imageUrl, 400) : null;
   const change = (patch: Partial<FormValues>) => setValues((current) => ({ ...current, ...patch }));
 
-  const handlePhoto = async (files: File[]) => {
-    const file = files[0];
+  const handlePhoto = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    // Clearing the input lets the same photo be picked again.
+    event.target.value = '';
     if (!file) return;
     try {
       setPhoto(await preparePhoto(file, PRODUCT_PHOTO_EDGE));
       setNotice(null);
-      // The floating buttons work from anywhere in the form, so bring the new photo into view.
+      // The photo buttons float over the form, so bring the new photo into view wherever it was scrolled to.
       photoSection.current?.scrollIntoView({ block: 'start' });
     } catch {
       setNotice({ tone: 'error', text: 'That file could not be opened as a photo.' });
     }
-  };
-
-  const handleFloatingPhoto = (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? []);
-    // Clearing the input lets the same photo be picked again.
-    event.target.value = '';
-    void handlePhoto(files);
   };
 
   const handleReadPhoto = async () => {
@@ -133,24 +128,24 @@ export function ProductForm({ product, countedPieces, canDelete, onDone, onCance
       <button type="button" className="back-button" aria-label="Back to products" disabled={isWriting} onClick={onCancel}>
         <Icon name="back" size={24} />
       </button>
-      {/* The same two choices as under "Product photo", in reach wherever the form is scrolled to. */}
+      {/* The product photo is taken or picked here, in reach wherever the form is scrolled to. */}
       <div className={`photo-floats${activity !== 'idle' ? ' disabled' : ''}`}>
         <label className="float-button" title="Upload a photo">
           <Icon name="image" size={24} />
           <span className="visually-hidden">Upload a product photo</span>
-          <input type="file" accept="image/*" className="visually-hidden" disabled={activity !== 'idle'} onChange={handleFloatingPhoto} />
+          <input type="file" accept="image/*" className="visually-hidden" disabled={activity !== 'idle'} onChange={handlePhoto} />
         </label>
         <label className="float-button primary" title="Take a photo">
           <Icon name="camera" size={24} />
           <span className="visually-hidden">Take a product photo</span>
-          <input type="file" accept="image/*" capture="environment" className="visually-hidden" disabled={activity !== 'idle'} onChange={handleFloatingPhoto} />
+          <input type="file" accept="image/*" capture="environment" className="visually-hidden" disabled={activity !== 'idle'} onChange={handlePhoto} />
         </label>
       </div>
       <h3>{product ? `Edit ${product.name}` : 'Add a product'}</h3>
 
       <fieldset className="product-photo" ref={photoSection}>
         <legend>Product photo</legend>
-        <p className="hint">A clean photo of one item, front label showing. It is stored in Google Drive, separately from count photos.</p>
+        <p className="hint">A clean photo of one item, front label showing. Use the camera or upload button at the bottom right. It is stored in Google Drive, separately from count photos.</p>
         {photo ? (
           <img src={photo.previewUrl} alt="New product photo" className="product-image" />
         ) : savedPhotoUrl ? (
@@ -158,7 +153,6 @@ export function ProductForm({ product, countedPieces, canDelete, onDone, onCance
         ) : (
           <p className="product-image placeholder">No photo yet</p>
         )}
-        <PhotoButtons multiple={false} disabled={activity !== 'idle'} onFiles={handlePhoto} />
         {photo && (
           <button type="button" className="button" disabled={activity !== 'idle'} onClick={handleReadPhoto}>
             <Icon name="sparkle" />

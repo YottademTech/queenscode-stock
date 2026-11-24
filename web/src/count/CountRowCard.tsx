@@ -20,6 +20,8 @@ type CountRowCardProps = {
   onDetailsChange: (change: Partial<RowDetails>) => void;
   onQuantitiesChange: (change: Partial<Quantities>) => void;
   onRemove: () => void;
+  /** False inside the hand-count panel, which has its own title and close button. */
+  showHead?: boolean;
 };
 
 export function CountRowCard(props: CountRowCardProps) {
@@ -33,8 +35,8 @@ export function CountRowCard(props: CountRowCardProps) {
     props.onDetailsChange({ newProduct: { ...row.newProduct, ...change } });
 
   return (
-    <li className={`card row-card confidence-${row.confidence.toLowerCase()}`}>
-      <div className="row-head">
+    <li className={`card row-card confidence-${row.confidence.toLowerCase()}${props.showHead === false ? ' bare' : ''}`}>
+      {props.showHead !== false && <div className="row-head">
         {photoPreviewUrl ? <img src={photoPreviewUrl} alt="" className="thumb" /> : <span className="thumb placeholder" aria-hidden="true">✎</span>}
         <div className="row-title">
           <strong>Row {position}</strong>
@@ -45,7 +47,7 @@ export function CountRowCard(props: CountRowCardProps) {
           <Icon name="trash" size={18} />
           Remove
         </button>
-      </div>
+      </div>}
 
       {row.note && <p className="row-note">{row.note}</p>}
 

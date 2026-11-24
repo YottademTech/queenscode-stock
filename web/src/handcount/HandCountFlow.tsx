@@ -33,7 +33,7 @@ export function HandCountFlow({ bootstrap, counter, onSaved }: HandCountFlowProp
   const quantity = totalPieces(quantities, product);
 
   const problems: string[] = [];
-  if (counter.trim() === '') problems.push('Enter your name at the top.');
+  if (counter.trim() === '') problems.push('Sign in again with your name.');
   if (!product) problems.push('Choose the product.');
   if (quantities.fullCartons > 0 && !packSizeFor(quantities, product)) problems.push(`Enter the pieces per ${(container ?? ANY_PACK).one}.`);
   if (kind !== 'correct' && quantity === 0) problems.push('Enter how many pieces to add or remove.');
@@ -78,7 +78,7 @@ export function HandCountFlow({ bootstrap, counter, onSaved }: HandCountFlowProp
       <p className="hint">Use this to fix a photo count, or for stock a photo cannot show. It never uses Claude.</p>
 
       <form onSubmit={handleSubmit} className="card">
-        <SelectField label="Where are you counting?" value={location} options={bootstrap.locations} onChange={setLocation} />
+        <SelectField label="Where are you counting from?" value={location} options={bootstrap.locations} onChange={setLocation} />
         <ProductPicker label="Product" products={bootstrap.products} value={productCode} allowNew={false} onChange={setProductCode} />
 
         <fieldset className="choices">
@@ -94,7 +94,7 @@ export function HandCountFlow({ bootstrap, counter, onSaved }: HandCountFlowProp
           ))}
         </fieldset>
 
-        <p className="hint">{countingHint(location)}</p>
+        {countingHint(location) && <p className="hint">{countingHint(location)}</p>}
         <QuantityFields
           value={quantities}
           container={container}
