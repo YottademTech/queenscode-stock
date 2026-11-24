@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from 'react';
+import { useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { api } from '../api/client';
 import { DETAIL_KEYS, type Product, type ProductDetails } from '../api/contract';
 import { createRequestIds } from '../lib/id';
@@ -35,6 +35,7 @@ export function ProductForm({ product, countedPieces, canDelete, onDone, onCance
   const [notice, setNotice] = useState<Notice | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const requestIds = useRef(createRequestIds()).current;
+  const photoSection = useRef<HTMLFieldSetElement>(null);
   const isWriting = activity === 'saving' || activity === 'deleting';
 
   const problems = detailProblems(values);
@@ -47,9 +48,18 @@ export function ProductForm({ product, countedPieces, canDelete, onDone, onCance
     try {
       setPhoto(await preparePhoto(file, PRODUCT_PHOTO_EDGE));
       setNotice(null);
+      // The floating buttons work from anywhere in the form, so bring the new photo into view.
+      photoSection.current?.scrollIntoView({ block: 'start' });
     } catch {
       setNotice({ tone: 'error', text: 'That file could not be opened as a photo.' });
     }
+  };
+
+  const handleFloatingPhoto = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    // Clearing the input lets the same photo be picked again.
+    event.target.value = '';
+    void handlePhoto(files);
   };
 
   const handleReadPhoto = async () => {
@@ -123,9 +133,22 @@ export function ProductForm({ product, countedPieces, canDelete, onDone, onCance
       <button type="button" className="back-button" aria-label="Back to products" disabled={isWriting} onClick={onCancel}>
         <Icon name="back" size={24} />
       </button>
+      {/* The same two choices as under "Product photo", in reach wherever the form is scrolled to. */}
+      <div className={`photo-floats${activity !== 'idle' ? ' disabled' : ''}`}>
+        <label className="float-button" title="Upload a photo">
+          <Icon name="image" size={24} />
+          <span className="visually-hidden">Upload a product photo</span>
+          <input type="file" accept="image/*" className="visually-hidden" disabled={activity !== 'idle'} onChange={handleFloatingPhoto} />
+        </label>
+        <label className="float-button primary" title="Take a photo">
+          <Icon name="camera" size={24} />
+          <span className="visually-hidden">Take a product photo</span>
+          <input type="file" accept="image/*" capture="environment" className="visually-hidden" disabled={activity !== 'idle'} onChange={handleFloatingPhoto} />
+        </label>
+      </div>
       <h3>{product ? `Edit ${product.name}` : 'Add a product'}</h3>
 
-      <fieldset className="product-photo">
+      <fieldset className="product-photo" ref={photoSection}>
         <legend>Product photo</legend>
         <p className="hint">A clean photo of one item, front label showing. It is stored in Google Drive, separately from count photos.</p>
         {photo ? (
