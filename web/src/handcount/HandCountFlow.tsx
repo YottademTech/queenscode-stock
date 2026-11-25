@@ -7,6 +7,7 @@ import { ANY_PACK, containerAt, countingHint } from '../count/containers';
 import { QuantityFields } from '../count/QuantityFields';
 import { NoticeBox, ProductPicker, SelectField, TextField, type Notice } from '../shared/fields';
 import { Icon } from '../shared/Icon';
+import { ProductPrice } from '../products/ProductPrice';
 
 const KIND_HELP: Record<AdjustmentKind, string> = {
   correct: "Replaces the photo count for this product and place. The latest entry wins.",
@@ -99,6 +100,10 @@ export function HandCountFlow({ bootstrap, counter, onSaved }: HandCountFlowProp
       <form ref={form} onSubmit={handleSubmit} className="card" noValidate>
         <SelectField label="Where are you counting from?" value={location} options={bootstrap.locations} onChange={setLocation} />
         <ProductPicker label="Product" products={bootstrap.products} value={productCode} allowNew={false} error={showErrors ? errors.product : undefined} onChange={setProductCode} />
+        {/* The chosen product's selling price, with its own Save: no stock is adjusted by it. */}
+        {product && bootstrap.currencies.length > 0 && bootstrap.actions.includes('setPrice') && (
+          <ProductPrice key={product.code} product={product} currencies={bootstrap.currencies} onSaved={onSaved} />
+        )}
 
         <fieldset className="choices">
           <legend>What is this entry?</legend>

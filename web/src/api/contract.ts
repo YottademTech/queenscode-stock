@@ -33,9 +33,16 @@ export const productSchema = z
     imageUrl: z.string(),
     // Every photo of the product, in order. An Apps Script from before several photos sends only imageUrl.
     imageUrls: z.array(z.string()).optional(),
+    /** Selling price per piece, in the currency's major unit (cedis, not pesewas). Set by a person, never by Claude. */
+    price: z.number().nullable().default(null),
+    /** ISO 4217 code of the price's currency, such as GHS; empty when there is no price. */
+    currency: z.string().default(''),
   })
   .transform((product) => ({ ...product, imageUrls: product.imageUrls ?? (product.imageUrl ? [product.imageUrl] : []) }));
 export type Product = z.infer<typeof productSchema>;
+
+export const currencySchema = z.object({ code: z.string(), name: z.string(), shortName: z.string(), decimals: z.number().int().min(0).max(3) });
+export type Currency = z.infer<typeof currencySchema>;
 
 export const bootstrapSchema = z.object({
   countDate: z.string(),
@@ -50,6 +57,9 @@ export const bootstrapSchema = z.object({
   // How many photos one product can hold. An Apps Script from before several photos keeps one, and
   // replaces it when a new one is sent.
   productPhotoLimit: z.number().int().min(1).default(1),
+  // The currencies a price can be in. An Apps Script from before prices sends none, and the app
+  // then shows no price fields.
+  currencies: z.array(currencySchema).default([]),
   // What the deployed Apps Script can do. One from before it said so offers nothing newer.
   actions: z.array(z.string()).default([]),
 });
@@ -143,7 +153,7 @@ export type DeleteProductInput = { requestId: string; productCode: string };
 
 export type SaveProductInput = {
   requestId: string;
-  product: ProductDetails & { code: string | null; packSize: number | null; reorderLevel: number | null };
+  product: ProductDetails & { code: string | null; packSize: number | null; reorderLevel: number | null } & Partial<PriceInput>;
   /** The one new photo, for an Apps Script that keeps one photo per product. */
   image?: EncodedImage | null;
   /** New photos, added after the kept ones. */
@@ -151,3 +161,8 @@ export type SaveProductInput = {
   /** The product's photos to keep, in order; any other photo it had is removed. */
   keepImageUrls?: string[];
 };
+
+/** A product's price: null clears it. Left out of a save, the price in the Sheet is kept. */
+export type PriceInput = { price: number | null; currency: string };
+
+export type SetPriceInput = PriceInput & { requestId: string; productCode: string };

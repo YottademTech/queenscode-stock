@@ -3,6 +3,7 @@ import type { Bootstrap, Product } from '../api/contract';
 import { driveThumbnail } from '../lib/image';
 import { NoticeBox, type Notice } from '../shared/fields';
 import { ProductForm } from './ProductForm';
+import { formatPrice } from './price';
 import { matchesSearch } from './search';
 import { Icon } from '../shared/Icon';
 
@@ -61,6 +62,7 @@ export function ProductsFlow({ bootstrap, onSaved }: ProductsFlowProps) {
           countedPieces={countedPieces}
           canDelete={bootstrap.actions.includes('deleteProduct')}
           photoLimit={bootstrap.productPhotoLimit}
+          currencies={bootstrap.currencies}
           onDone={handleDone}
           onCancel={() => setEditing({ kind: 'list' })}
         />
@@ -150,6 +152,7 @@ export function ProductsFlow({ bootstrap, onSaved }: ProductsFlowProps) {
           const thumbnail = driveThumbnail(product.imageUrl, 400);
           const missing = missingDetails(product);
           const facts = [product.size, product.category].filter(Boolean).join(' · ');
+          const price = formatPrice(product.price, product.currency, bootstrap.currencies);
           return (
             <li key={product.code}>
               <button type="button" className="product-card" title={product.name} onClick={() => { setNotice(null); setEditing({ kind: 'editing', product }); }}>
@@ -160,6 +163,7 @@ export function ProductsFlow({ bootstrap, onSaved }: ProductsFlowProps) {
                 <span className="card-text">
                   <strong>{product.name}</strong>
                   {facts && <small>{facts}</small>}
+                  {price && <span className="card-price">{price}</span>}
                 </span>
                 {missing.length > 0 && <span className="visually-hidden">Missing: {missing.join(', ')}</span>}
               </button>

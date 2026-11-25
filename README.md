@@ -8,7 +8,7 @@ web/           React app (Vite + TypeScript) for phones
 apps-script/   Code.gs: the backend, pasted into the Sheet's Apps Script project
 ```
 
-The data contract (tabs and columns) is in `STOCK_APP_BRIEF.md`. The app adds columns G to U to
+The data contract (tabs and columns) is in `STOCK_APP_BRIEF.md`. The app adds columns G to W to
 Products and one hidden tab, `App_Requests`.
 
 ## What Claude records about a product
@@ -34,6 +34,26 @@ and the X on a photo removes it. Nothing changes until **Save product** is tappe
 The links are kept in the Products tab's photo column (I), one per line; the first is the one the
 product list shows. A removed photo goes to the Google Drive trash, where it can be restored for 30
 days. Until the new Apps Script is published, the app keeps one photo per product, as before.
+
+## Prices
+
+A product's selling price per piece is set by the person reviewing products, never by Claude: on the
+product's page (saved with **Save product**), or on the Adjustments screen once a product is chosen.
+On Adjustments the price has its own **Save price**, so changing a price never records a stock
+adjustment. Leaving the price empty means it is not decided yet.
+
+How it is kept, ready to move into a database:
+
+- **Products!V Price**: a number in the currency's major unit (25.50 means GH₵ 25.50, not pesewas),
+  formatted with two decimals. Empty when there is no price. Maps to a `numeric(12,2)` column.
+- **Products!W Currency**: the ISO 4217 code, such as `GHS`. Empty when there is no price. In the
+  Sheet it can only be picked from the Currencies tab. Maps to a foreign key to `currencies.code`.
+- **Currencies tab**: Code (ISO 4217), Name, Short name (what a till or receipt shows, such as
+  GH₵) and Decimals (2 for cedis, 0 for CFA francs). It starts with GHS, USD, EUR, GBP, NGN, XOF,
+  ZAR, CNY and AED; add rows to offer more. Maps to a `currencies` table keyed on the code.
+
+The product code (column A) stays the key every tab refers to. The server checks a price against
+its currency: no negative amounts, and no more decimals than the currency has.
 
 ## Deleting a product
 

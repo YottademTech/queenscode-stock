@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { api } from '../api/client';
-import { DETAIL_KEYS, type Product, type ProductDetails } from '../api/contract';
+import { DETAIL_KEYS, type Currency, type Product, type ProductDetails } from '../api/contract';
 import { createRequestIds } from '../lib/id';
 import { newId } from '../lib/id';
 import { PRODUCT_PHOTO_EDGE, driveThumbnail, preparePhoto, type PreparedPhoto } from '../lib/image';
@@ -8,6 +8,8 @@ import { NoticeBox, NumberField, type Notice } from '../shared/fields';
 import { Icon } from '../shared/Icon';
 import { detailProblems, emptyDetails, pickDetails, trimDetails } from './details';
 import { PhotoCarousel, type CarouselPhoto } from './PhotoCarousel';
+import { PriceFields } from './PriceFields';
+import { priceDraft, readPrice } from './price';
 import { ProductDetailFields } from './ProductDetailFields';
 
 type FormValues = ProductDetails & { packSize: number | null; reorderLevel: number | null };
@@ -29,12 +31,14 @@ type ProductFormProps = {
    * photo then replaces the old one, and a saved photo cannot be removed.
    */
   photoLimit: number;
+  /** The currencies a price can be in; none when the Apps Script predates prices, and then no price is shown. */
+  currencies: readonly Currency[];
   /** Called with a message for the list once the product is saved or deleted. */
   onDone: (message: string) => void;
   onCancel: () => void;
 };
 
-export function ProductForm({ product, countedPieces, canDelete, photoLimit, onDone, onCancel }: ProductFormProps) {
+export function ProductForm({ product, countedPieces, canDelete, photoLimit, currencies, onDone, onCancel }: ProductFormProps) {
   const [values, setValues] = useState<FormValues>({
     ...(product ? pickDetails(product) : emptyDetails()),
     packSize: product?.packSize ?? null,
@@ -46,6 +50,10 @@ export function ProductForm({ product, countedPieces, canDelete, photoLimit, onD
   const [showing, setShowing] = useState(0);
   const [jumpTo, setJumpTo] = useState<number | undefined>(undefined);
   const onePhotoOnly = photoLimit === 1;
+  // The selling price is for the person reviewing the product to set; nothing reads it off a photo.
+  const [price, setPrice] = useState(() => priceDraft(product?.price ?? null, product?.currency ?? '', currencies));
+  const hasPrices = currencies.length > 0;
+  const priceRead = readPrice(price, currencies);
   const [activity, setActivity] = useState<Activity>('idle');
   const [notice, setNotice] = useState<Notice | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -53,7 +61,7 @@ export function ProductForm({ product, countedPieces, canDelete, photoLimit, onD
   const photoSection = useRef<HTMLFieldSetElement>(null);
   const isWriting = activity === 'saving' || activity === 'deleting';
 
-  const problems = detailProblems(values);
+  const problems = [...detailProblems(values), ...(hasPrices && !priceRead.ok ? [priceRead.error] : [])];
   const change = (patch: Partial<FormValues>) => setValues((current) => ({ ...current, ...patch }));
 
   // With one photo per product, a new photo is shown in place of the saved one it will replace.
@@ -144,6 +152,8 @@ export function ProductForm({ product, countedPieces, canDelete, photoLimit, onD
         code: product?.code ?? null,
         packSize: values.packSize,
         reorderLevel: values.reorderLevel,
+        // Only sent where the Apps Script keeps prices; an older one would refuse nothing but store nothing.
+        ...(hasPrices && priceRead.ok ? priceRead.value : {}),
       },
       ...(onePhotoOnly
         ? { image: added[0]?.image ?? null }
@@ -229,6 +239,15 @@ export function ProductForm({ product, countedPieces, canDelete, photoLimit, onD
         <NumberField label="Pieces per bag, sack or carton" value={values.packSize} onChange={(packSize) => change({ packSize })} />
         <NumberField label="Reorder level (pieces)" value={values.reorderLevel} onChange={(reorderLevel) => change({ reorderLevel })} />
       </div>
+      {hasPrices && (
+        <PriceFields
+          value={price}
+          currencies={currencies}
+          error={priceRead.ok ? undefined : priceRead.error}
+          hint="Optional. Leave it empty if the price is not decided yet."
+          onChange={setPrice}
+        />
+      )}
 
       {problems.length > 0 && (
         <ul className="problems" id="product-problems">

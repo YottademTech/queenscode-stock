@@ -389,7 +389,7 @@ test('every detail of a new product is stored in the Products tab and comes back
   ]);
 
   const saved = backend.post({ action: 'bootstrap' }).data.products[2];
-  assert.deepEqual(saved, { ...details, code: 'QBHRWT-200', packSize: null, reorderLevel: null, imageUrl: '', imageUrls: [] });
+  assert.deepEqual(saved, { ...details, code: 'QBHRWT-200', packSize: null, reorderLevel: null, imageUrl: '', imageUrls: [], price: null, currency: '' });
 
   const tooLong = backend.post(saveCounts([countRow({ productCode: null, newProduct: { name: 'X', labelText: 'a'.repeat(5001) } })], { requestId: 'request-0003' }));
   assert.match(tooLong.error.message, /label text is too long/);
@@ -595,6 +595,63 @@ test('too many photos for a product, or in one save, are refused before anything
   assert.equal(photoCell(backend), kept.join('\n'));
 });
 
+const priceCells = (backend, row = 3) => backend.workbook.get('Products').rowValues(row, 23).slice(21);
+
+test('a product keeps its selling price as a number and a currency code, ready for a database', () => {
+  const backend = loadBackend();
+  backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion', price: 25.5, currency: 'GHS' }));
+  assert.deepEqual(priceCells(backend), [25.5, 'GHS']);
+
+  const product = backend.post({ action: 'bootstrap' }).data.products.find((p) => p.code === 'RG-YEL');
+  assert.deepEqual([product.price, product.currency], [25.5, 'GHS']);
+
+  // A save without a price (an app from before prices) keeps it; null clears both cells.
+  backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion', brand: 'Rich Glow' }, { requestId: 'request-0102' }));
+  assert.deepEqual(priceCells(backend), [25.5, 'GHS']);
+  backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion', price: null }, { requestId: 'request-0103' }));
+  assert.deepEqual(priceCells(backend), ['', '']);
+
+  // A new product can be priced when it is added.
+  backend.post(saveProduct({ price: 1500, currency: 'XOF' }, { requestId: 'request-0104' }));
+  assert.deepEqual(priceCells(backend, 4), [1500, 'XOF']);
+});
+
+test('a price is refused in an unknown currency, below zero, or with more decimals than its currency has', () => {
+  const backend = loadBackend();
+  const tryPrice = (price, currency, n) => backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion', price, currency }, { requestId: `request-02${n}0` }));
+  assert.match(tryPrice(10, 'XYZ', 1).error.message, /Choose the currency/);
+  assert.match(tryPrice(-1, 'GHS', 2).error.message, /from 0 to/);
+  assert.match(tryPrice('12', 'GHS', 3).error.message, /from 0 to/);
+  assert.match(tryPrice(10.555, 'GHS', 4).error.message, /at most 2 decimals/);
+  assert.match(tryPrice(10.5, 'XOF', 5).error.message, /XOF has no decimals/);
+  assert.deepEqual(priceCells(backend), ['', ''], 'nothing was written');
+});
+
+test('the price can be set on its own, without saving a stock adjustment', () => {
+  const backend = loadBackend();
+  const reply = backend.post({ action: 'setPrice', requestId: 'request-0300', productCode: 'RG-YEL', price: 18, currency: 'GHS' });
+  assert.deepEqual(reply, { ok: true, data: { duplicate: false } });
+  assert.deepEqual(priceCells(backend), [18, 'GHS']);
+  assert.equal(backend.workbook.get('Form_Adjustments').getLastRow(), 2, 'no adjustment row was added');
+
+  assert.equal(backend.post({ action: 'setPrice', requestId: 'request-0301', productCode: 'GONE', price: 1, currency: 'GHS' }).error.code, 'invalid_request');
+  assert.match(backend.post({ action: 'setPrice', requestId: 'request-0302', productCode: 'RG-YEL' }).error.message, /Enter the price/);
+});
+
+test('the Currencies tab is made with the usual currencies, and the owner can add to it', () => {
+  const backend = loadBackend();
+  const { data } = backend.post({ action: 'bootstrap' });
+  assert.deepEqual(data.currencies[0], { code: 'GHS', name: 'Ghana cedi', shortName: 'GH₵', decimals: 2 });
+  assert.ok(data.currencies.some((currency) => currency.code === 'XOF' && currency.decimals === 0));
+
+  const sheet = backend.workbook.get('Currencies');
+  assert.deepEqual(sheet.rowValues(1, 4), ['Code', 'Name', 'Short name', 'Decimals']);
+  sheet.fill(sheet.getLastRow() + 1, [['kes', 'Kenyan shilling', 'KSh', 2], ['not a code', 'x', 'x', 2]]);
+  const codes = backend.post({ action: 'bootstrap' }).data.currencies.map((currency) => currency.code);
+  assert.ok(codes.includes('KES'));
+  assert.ok(!codes.includes('NOT A CODE'));
+});
+
 test('a product save is refused for a duplicate name, an unknown code, bad details or a full tab', () => {
   const refused = [
     [saveProduct({ name: 'rich glow yellow tone lotion' }), 'invalid_request'],
@@ -699,10 +756,13 @@ test('setup prepares an untouched workbook and is safe to run again', () => {
   const summary = backend.context.setup();
 
   const products = workbook.get('Products');
-  assert.deepEqual(products.rowValues(1, 21).slice(6), ADDED_HEADERS);
+  assert.deepEqual(products.rowValues(1, 23).slice(6), ADDED_HEADERS);
   // Every detail column except the name is plain text, so Sheets cannot rewrite what was read off a label.
-  assert.deepEqual(products.formats.map((entry) => entry.column), [3, 4, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
-  assert.ok(products.formats.every((entry) => entry.format === '@'));
+  // Details stay plain text; the price is a number with two decimals; the currency a code from the Currencies tab.
+  assert.deepEqual(products.formats.map((entry) => `${entry.column}:${entry.format}`), [
+    ...[3, 4, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21].map((column) => `${column}:@`), '22:0.00', '23:@',
+  ]);
+  assert.deepEqual(products.validations.map((entry) => [entry.column, entry.rule.listFrom, entry.rule.allowInvalid]), [[23, 'Currencies!2:1', false]]);
   assert.equal(workbook.get('App_Requests').hidden, true);
   assert.equal(workbook.get('Form_Adjustments').getLastRow(), 1, 'the EXAMPLE correction must not count as stock');
   assert.equal(backend.store.get('IMAGE_FOLDER_ID'), 'new-folder');
@@ -728,7 +788,7 @@ test('a Sheet prepared by the version before the QR code column brings itself up
   const loaded = backend.post({ action: 'bootstrap' });
   assert.equal(loaded.ok, true);
   assert.deepEqual(loaded.data.products.map((product) => product.qrCode), ['', '']);
-  assert.deepEqual(products.rowValues(1, 21).slice(6), ADDED_HEADERS);
+  assert.deepEqual(products.rowValues(1, 23).slice(6), ADDED_HEADERS);
   assert.ok(products.formats.some((entry) => entry.column === 21 && entry.format === '@'));
 
   // An app from before the field existed sends no qrCode; the save still goes through.
@@ -741,13 +801,15 @@ test('a Sheet prepared by the version before the QR code column brings itself up
 });
 
 test('a Sheet whose next free header cell the owner has used is not overwritten when the app loads', () => {
+  // Prepared by the version before prices, with the owner's own heading where Price would go.
   const workbook = makeWorkbook();
-  workbook.get('Products').write(1, 21, 'Supplier');
+  workbook.get('Products').write(1, 22, 'Supplier');
+  workbook.get('Products').write(1, 23, '');
   const reply = loadBackend({ workbook }).post({ action: 'bootstrap' });
 
   assert.equal(reply.error.code, 'not_configured');
   assert.match(reply.error.message, /already holds other content \("Supplier"\)/);
-  assert.equal(workbook.get('Products').read(1, 21), 'Supplier');
+  assert.equal(workbook.get('Products').read(1, 22), 'Supplier');
 });
 
 test('setup refuses to overwrite header cells the owner has used for something else', () => {
@@ -765,7 +827,7 @@ test('setup builds the whole workbook in a blank Google Sheet, ready to count in
 
   const summary = backend.context.setup();
   assert.match(summary, /Created tabs: Settings, Products, Claude_Counts, Form_Adjustments, Stock\./);
-  assert.deepEqual([...workbook.keys()], ['Sheet1', 'Settings', 'Products', 'Claude_Counts', 'Form_Adjustments', 'Stock', 'App_Requests']);
+  assert.deepEqual([...workbook.keys()], ['Sheet1', 'Settings', 'Products', 'Claude_Counts', 'Form_Adjustments', 'Stock', 'Currencies', 'App_Requests']);
 
   const { data } = backend.post({ action: 'bootstrap' });
   assert.equal(data.countDate, data.today, 'a new Sheet starts a stocktake dated today');

@@ -6,7 +6,7 @@ import { matchesSearch } from './search';
 const product = (overrides: Partial<Product> = {}): Product => ({
   ...emptyDetails(),
   code: 'LGCFF', name: 'Lovillea Gelly Cologne Fruity Floral', size: '100 ml', barcode: '4902806012538', brand: 'Mandom', category: 'Body cologne',
-  packSize: null, reorderLevel: null, imageUrl: '', imageUrls: [],
+  packSize: null, reorderLevel: null, imageUrl: '', imageUrls: [], price: null, currency: '',
   ...overrides,
 });
 

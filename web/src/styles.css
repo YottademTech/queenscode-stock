@@ -489,6 +489,15 @@ details[open] > summary::after { transform: translateY(0.25rem) rotate(-135deg);
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3;
 }
 .card-text small { font-size: 0.75rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-price { font-size: 0.82rem; font-weight: 700; color: var(--gold-deep); font-variant-numeric: tabular-nums; }
+/* Price and currency share a row: the currency list on the left, the amount on the right. */
+.price-fields { margin: 0.9rem 0; }
+.price-row { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 0 0.7rem; align-items: end; }
+.price-row .field { margin: 0.3rem 0 0; }
+.price-row select { text-overflow: ellipsis; }
+.product-price { margin: 0.4rem 0 1rem; padding: 0.75rem 0.9rem; border-radius: var(--round-m); background: var(--tint); }
+.product-price .price-fields { margin: 0.4rem 0 0.6rem; }
+.product-price-now { margin: 0; font-size: 0.9rem; }
 .slide-controls { display: flex; align-items: center; justify-content: space-between; gap: 0.9rem; margin-top: 0.85rem; }
 .slide-controls p { margin: 0; min-width: 7.5rem; text-align: center; font-size: 0.9rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 .slide-button {

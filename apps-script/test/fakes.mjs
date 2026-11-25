@@ -42,11 +42,15 @@ class FakeRange {
     this.sheet.formats.push({ row: this.row, column: this.column, format });
     return this;
   }
+  setDataValidation(rule) {
+    this.sheet.validations.push({ row: this.row, column: this.column, rule });
+    return this;
+  }
 }
 
 export class FakeSheet {
   constructor(name, maxRows, maxColumns) {
-    Object.assign(this, { name, maxRows, maxColumns, cells: new Map(), formats: [], hidden: false });
+    Object.assign(this, { name, maxRows, maxColumns, cells: new Map(), formats: [], validations: [], hidden: false, parent: null });
   }
   // Code.gs runs in its own realm, where a Date made by the tests would fail `instanceof Date`.
   static DateClass = Date;
@@ -89,12 +93,14 @@ export class FakeSheet {
     this.cells = kept;
   }
   hideSheet() { this.hidden = true; }
+  getParent() { return this.parent; }
 }
 
 // Products G to U, as setup() writes them.
 export const ADDED_HEADERS = [
   'Category', 'Expiry date', 'Product image', 'Brand', 'Variant', 'Description', 'Batch number', 'Manufacture date',
   'Manufacturer', 'Country of origin', 'Ingredients', 'Directions', 'Other details', 'Label text', 'QR code',
+  'Price', 'Currency',
 ];
 
 export const COUNT_DATE = new Date(Date.UTC(2026, 10, 23));
@@ -107,7 +113,7 @@ export function makeWorkbook({ prepared = true } = {}) {
     ['Adjustment type: correct', 'Correct the count'], ['Adjustment type: add', 'Add stock'],
     ['Adjustment type: remove', 'Remove stock'],
   ]);
-  const products = new FakeSheet('Products', 201, prepared ? 21 : 8).fill(1, [
+  const products = new FakeSheet('Products', 201, prepared ? 23 : 8).fill(1, [
     ['Code', 'Product name', 'Size', 'Barcode number', 'Pack size (pieces per carton)', 'Reorder level (pieces)',
       ...(prepared ? ADDED_HEADERS : ['', 'Names and sizes read from the shelf photos.'])],
     ['RG-BLK-500', 'Rich Glow Advanced Whitening Lotion (Black)', '500ml'],
@@ -148,19 +154,34 @@ export function loadBackend({ workbook = makeWorkbook(), properties = {}, claude
   }).filter(([, value]) => value !== null));
   const recorded = { claudeRequests: [], driveFiles: [], driveUpdates: [], folders: [], lockHeld: false, errors: [] };
 
+  const spreadsheet = {
+    getSheetByName: (name) => workbook.get(name) ?? null,
+    getSpreadsheetTimeZone: () => 'UTC',
+    insertSheet: (name) => {
+      const sheet = new FakeSheet(name, 1000, 26);
+      sheet.parent = spreadsheet;
+      workbook.set(name, sheet);
+      return sheet;
+    },
+  };
+  for (const sheet of workbook.values()) sheet.parent = spreadsheet;
+
   const context = vm.createContext({
     console: { log() {}, error: (message) => recorded.errors.push(String(message)) },
     SpreadsheetApp: {
-      getActiveSpreadsheet: () => ({
-        getSheetByName: (name) => workbook.get(name) ?? null,
-        getSpreadsheetTimeZone: () => 'UTC',
-        insertSheet: (name) => {
-          const sheet = new FakeSheet(name, 1000, 26);
-          workbook.set(name, sheet);
-          return sheet;
-        },
-      }),
+      getActiveSpreadsheet: () => spreadsheet,
       flush() {},
+      // Records the rule a range is given; the fakes do not enforce it.
+      newDataValidation: () => {
+        const rule = {};
+        const builder = {
+          requireValueInRange: (range, showDropdown) => Object.assign(rule, { listFrom: `${range.sheet.name}!${range.row}:${range.column}`, showDropdown }) && builder,
+          setAllowInvalid: (allow) => Object.assign(rule, { allowInvalid: allow }) && builder,
+          setHelpText: (text) => Object.assign(rule, { helpText: text }) && builder,
+          build: () => rule,
+        };
+        return builder;
+      },
     },
     PropertiesService: {
       getScriptProperties: () => ({

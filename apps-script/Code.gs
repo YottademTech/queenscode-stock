@@ -21,6 +21,7 @@ const SHEET = {
   counts: 'Claude_Counts',
   stock: 'Stock',
   requests: 'App_Requests',
+  currencies: 'Currencies',
 };
 
 // The Stock tab's formulas only read these row ranges, so rows outside them would be ignored.
@@ -58,15 +59,44 @@ const DETAIL_FIELDS = [
   { key: 'qrCode', column: 21, header: 'QR code', max: 2000, kind: 'line', readFromPhoto: false },
 ];
 const IMAGE_COLUMN = 9;
-const PRODUCT_COLUMN_COUNT = 21;
+/** The last column a product's details are written to (U); price and currency come after. */
+const DETAIL_LAST_COLUMN = 21;
+/**
+ * The selling price per piece, set by the person reviewing products, never by Claude. Kept as a
+ * number in the currency's major unit (cedis, not pesewas), with the ISO 4217 code of its currency
+ * beside it, so a database can take them as a decimal and a foreign key to the Currencies tab.
+ */
+const PRICE_COLUMN = 22;
+const CURRENCY_COLUMN = 23;
+const PRODUCT_COLUMN_COUNT = 23;
+const MAX_PRICE = 1000000000;
 
-// Headers for the columns setup() adds, G to U, in sheet order.
+// Headers for the columns setup() adds, G to W, in sheet order.
 const FIRST_ADDED_COLUMN = 7;
 const ADDED_HEADERS = [];
 for (let column = FIRST_ADDED_COLUMN; column <= PRODUCT_COLUMN_COUNT; column++) {
   const field = DETAIL_FIELDS.filter((candidate) => candidate.column === column)[0];
-  ADDED_HEADERS.push(field ? field.header : 'Product image');
+  const other = { 9: 'Product image', 22: 'Price', 23: 'Currency' };
+  ADDED_HEADERS.push(field ? field.header : other[column]);
 }
+
+/**
+ * The currencies a price can be in, as the Currencies tab starts. The owner can add rows there.
+ * Code is ISO 4217; short name is what a receipt or till shows; decimals is the minor unit.
+ */
+const CURRENCY_HEADERS = ['Code', 'Name', 'Short name', 'Decimals'];
+const DEFAULT_CURRENCIES = [
+  ['GHS', 'Ghana cedi', 'GH₵', 2],
+  ['USD', 'US dollar', 'US$', 2],
+  ['EUR', 'Euro', '€', 2],
+  ['GBP', 'Pound sterling', '£', 2],
+  ['NGN', 'Nigerian naira', '₦', 2],
+  ['XOF', 'West African CFA franc', 'CFA', 0],
+  ['ZAR', 'South African rand', 'R', 2],
+  ['CNY', 'Chinese yuan', 'CN¥', 2],
+  ['AED', 'UAE dirham', 'AED', 2],
+];
+const MAX_CURRENCIES = 50;
 
 const CONFIDENCE_LEVELS = ['High', 'Medium', 'Low'];
 const IMAGE_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
@@ -104,6 +134,7 @@ const ACTIONS = {
   saveCounts: saveCounts,
   saveProduct: saveProduct,
   deleteProduct: deleteProduct,
+  setPrice: setProductPrice,
   adjust: saveAdjustment,
 };
 
@@ -202,6 +233,8 @@ function bootstrap() {
     photoSetLimit: MAX_PHOTOS_PER_COUNT,
     // Tells the app that a product can hold several photos, and how many.
     productPhotoLimit: MAX_PHOTOS_PER_PRODUCT,
+    // The currencies a price can be in, from the Currencies tab.
+    currencies: readCurrencies(ss),
     // What this deployed script can do, so the app only offers what will work.
     actions: Object.keys(ACTIONS),
   };
@@ -700,21 +733,67 @@ function saveProduct(request) {
       throw new AppError('invalid_request', 'A product can have up to ' + MAX_PHOTOS_PER_PRODUCT + ' photos. Remove some before adding more.');
     }
     const removedUrls = existingUrls.filter((url) => keptUrls.indexOf(url) === -1);
+    // Checked before anything is stored, like the photo limit above.
+    const price = parsePrice(request.product, readCurrencies(ss));
     const photosChange = images.length > 0 || removedUrls.length > 0;
     const newUrls = images.map((image) => storeProductImage(code, image));
 
     if (input.code) {
       // Two columns are skipped. The name (B) stays because the Stock tab matches hand corrections
       // by product name, and the photo links (I) are only rewritten when photos were added or removed.
+      // The price (V, W) is only written when one was sent: an app from before prices leaves it alone.
       const cells = productCells(input);
       sheet.getRange(row, 3, 1, IMAGE_COLUMN - 3).setValues([cells.slice(2, IMAGE_COLUMN - 1)]);
-      sheet.getRange(row, IMAGE_COLUMN + 1, 1, PRODUCT_COLUMN_COUNT - IMAGE_COLUMN).setValues([cells.slice(IMAGE_COLUMN)]);
+      sheet.getRange(row, IMAGE_COLUMN + 1, 1, DETAIL_LAST_COLUMN - IMAGE_COLUMN).setValues([cells.slice(IMAGE_COLUMN, DETAIL_LAST_COLUMN)]);
+      if (price !== undefined) writePrice(sheet, row, price);
     } else {
-      writeNewProduct(sheet, row, Object.assign({}, input, { code: code }));
+      writeNewProduct(sheet, row, Object.assign({}, input, { code: code }, price || {}));
     }
     if (photosChange) sheet.getRange(row, IMAGE_COLUMN).setValue(keptUrls.concat(newUrls).join('\n'));
     removedUrls.forEach(trashProductImage);
   });
+}
+
+/** Sets or clears a product's selling price, on its own: no stock is adjusted. */
+function setProductPrice(request) {
+  const ss = spreadsheet();
+  const code = requiredText(request.productCode, 'product', 60);
+  const price = parsePrice(request, readCurrencies(ss));
+  if (price === undefined) throw new AppError('invalid_request', 'Enter the price, or leave it empty to clear it.');
+
+  return withWriteLock(ss, request, () => {
+    const product = readProducts(ss).filter((candidate) => candidate.code === code)[0];
+    if (!product) throw new AppError('invalid_request', 'That product is no longer in the Sheet. Reload the app.');
+    writePrice(requireSheet(ss, SHEET.products), product.row, price);
+  });
+}
+
+/** Writes a price and its currency code, or empties both when the price was cleared. */
+function writePrice(sheet, row, price) {
+  sheet.getRange(row, PRICE_COLUMN, 1, 2).setValues([[price.price === null ? '' : price.price, price.price === null ? '' : price.currency]]);
+}
+
+/**
+ * The price in a request, checked against the Currencies tab: undefined when none was sent (keep
+ * the one in the Sheet), { price: null } to clear it, else the amount rounded to its currency.
+ */
+function parsePrice(source, currencies) {
+  if (!isRecord(source) || source.price === undefined) return undefined;
+  if (source.price === null) return { price: null, currency: '' };
+  const currency = currencies.filter((candidate) => candidate.code === source.currency)[0];
+  if (!currency) throw new AppError('invalid_request', 'Choose the currency of the price.');
+  const amount = source.price;
+  if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0 || amount > MAX_PRICE) {
+    throw new AppError('invalid_request', 'The price must be a number from 0 to ' + MAX_PRICE + '.');
+  }
+  const scale = Math.pow(10, currency.decimals);
+  const rounded = Math.round(amount * scale) / scale;
+  if (Math.abs(rounded - amount) > 1e-9) {
+    throw new AppError('invalid_request', currency.decimals === 0
+      ? 'A price in ' + currency.code + ' has no decimals.'
+      : 'A price in ' + currency.code + ' has at most ' + currency.decimals + ' decimals.');
+  }
+  return { price: rounded, currency: currency.code };
 }
 
 function parseProductImages(request) {
@@ -937,7 +1016,7 @@ function writeNewProduct(sheet, row, product) {
   sheet.getRange(row, 1, 1, PRODUCT_COLUMN_COUNT).setValues([productCells(product)]);
 }
 
-/** One Products row, A to U, for a product. The photo link (I) is left blank; it is set separately. */
+/** One Products row, A to W, for a product. The photo links (I) are left blank; they are set separately. */
 function productCells(product) {
   const cells = new Array(PRODUCT_COLUMN_COUNT).fill('');
   cells[0] = product.code;
@@ -946,6 +1025,9 @@ function productCells(product) {
   DETAIL_FIELDS.forEach((field) => {
     cells[field.column - 1] = sheetText(product[field.key]);
   });
+  const hasPrice = typeof product.price === 'number';
+  cells[PRICE_COLUMN - 1] = hasPrice ? product.price : '';
+  cells[CURRENCY_COLUMN - 1] = hasPrice ? product.currency : '';
   return cells;
 }
 
@@ -1045,6 +1127,8 @@ function readProducts(ss) {
       };
       // The first photo is the one the product list shows, also for an app from before several photos.
       product.imageUrl = product.imageUrls[0] || '';
+      product.price = numberOrNull(cells[PRICE_COLUMN - 1]);
+      product.currency = product.price === null ? '' : String(cells[CURRENCY_COLUMN - 1]).trim().toUpperCase();
       DETAIL_FIELDS.forEach((field) => {
         const cell = cells[field.column - 1];
         // A date typed into the Sheet by hand arrives as a Date; the app works with its text form.
@@ -1053,6 +1137,33 @@ function readProducts(ss) {
       return product;
     })
     .filter((product) => product.code !== '');
+}
+
+/**
+ * The currencies a price can be in. The Currencies tab is made with the usual ones the first time it
+ * is needed, so a Sheet set up before prices works as soon as this version is deployed.
+ */
+function readCurrencies(ss) {
+  const sheet = ensureCurrenciesTab(ss);
+  const last = Math.min(sheet.getLastRow(), MAX_CURRENCIES + 1);
+  if (last < 2) return [];
+  return sheet.getRange(2, 1, last - 1, 4).getValues()
+    .map((cells) => ({
+      code: String(cells[0]).trim().toUpperCase(),
+      name: String(cells[1]).trim(),
+      shortName: String(cells[2]).trim(),
+      decimals: Number(cells[3]) >= 0 && Number(cells[3]) <= 3 && cells[3] !== '' ? Math.round(Number(cells[3])) : 2,
+    }))
+    .filter((currency) => /^[A-Z]{3}$/.test(currency.code));
+}
+
+function ensureCurrenciesTab(ss) {
+  const existing = ss.getSheetByName(SHEET.currencies);
+  if (existing) return existing;
+  const sheet = ss.insertSheet(SHEET.currencies);
+  sheet.getRange(1, 1, 1, CURRENCY_HEADERS.length).setValues([CURRENCY_HEADERS]);
+  sheet.getRange(2, 1, DEFAULT_CURRENCIES.length, CURRENCY_HEADERS.length).setValues(DEFAULT_CURRENCIES);
+  return sheet;
 }
 
 function publicProduct(product) {
@@ -1432,7 +1543,7 @@ function setup() {
   return summary;
 }
 
-/** Gives the Products tab its rows, the columns this script adds (G to U), their headers and text format. Safe to repeat. */
+/** Gives the Products tab its rows, the columns this script adds (G to W), their headers and formats. Safe to repeat. */
 function prepareProductsTab(products) {
   const lastProductRow = PRODUCT_FIRST_ROW + PRODUCT_ROW_COUNT - 1;
   if (products.getMaxRows() < lastProductRow) {
@@ -1442,12 +1553,12 @@ function prepareProductsTab(products) {
     products.insertColumnsAfter(products.getMaxColumns(), PRODUCT_COLUMN_COUNT - products.getMaxColumns());
   }
 
-  // G1:U1 may only hold our headers or the workbook's original fill-in note; anything else is the owner's.
+  // G1:W1 may only hold our headers or the workbook's original fill-in note; anything else is the owner's.
   const headerRange = products.getRange(1, FIRST_ADDED_COLUMN, 1, ADDED_HEADERS.length);
   const unexpected = headerRange.getValues()[0].filter((cell, index) =>
     cell !== '' && cell !== ADDED_HEADERS[index] && String(cell).indexOf('Names and sizes read') !== 0);
   if (unexpected.length > 0) {
-    throw new AppError('not_configured', 'Products!G1:U1 already holds other content ("' + unexpected[0] + '"). Clear those cells, then run setup() again.');
+    throw new AppError('not_configured', 'Products!G1:W1 already holds other content ("' + unexpected[0] + '"). Clear those cells, then run setup() again.');
   }
   headerRange.setValues([ADDED_HEADERS]);
 
@@ -1456,6 +1567,17 @@ function prepareProductsTab(products) {
   DETAIL_FIELDS.filter((field) => field.key !== 'name').forEach((field) => {
     products.getRange(PRODUCT_FIRST_ROW, field.column, PRODUCT_ROW_COUNT, 1).setNumberFormat('@');
   });
+
+  // The price stays a number, shown with two decimals. The currency is a code from the Currencies
+  // tab, and anyone editing it in the Sheet picks it from that list.
+  products.getRange(PRODUCT_FIRST_ROW, PRICE_COLUMN, PRODUCT_ROW_COUNT, 1).setNumberFormat('0.00');
+  const currencyCells = products.getRange(PRODUCT_FIRST_ROW, CURRENCY_COLUMN, PRODUCT_ROW_COUNT, 1).setNumberFormat('@');
+  const currencies = ensureCurrenciesTab(products.getParent());
+  currencyCells.setDataValidation(SpreadsheetApp.newDataValidation()
+    .requireValueInRange(currencies.getRange(2, 1, MAX_CURRENCIES, 1), true)
+    .setAllowInvalid(false)
+    .setHelpText('A currency code from the Currencies tab, such as GHS.')
+    .build());
 }
 
 function createPhotoFolder() {

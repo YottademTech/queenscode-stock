@@ -10,6 +10,7 @@ import {
   type EncodedImage,
   type SaveCountsInput,
   type SaveProductInput,
+  type SetPriceInput,
 } from './contract';
 
 /**
@@ -81,4 +82,5 @@ export const api = {
   saveAdjustment: (input: AdjustmentInput) => call('adjust', input, saveResultSchema, QUICK_TIMEOUT_MS),
   saveProduct: (input: SaveProductInput) => call('saveProduct', input, saveResultSchema, PHOTO_TIMEOUT_MS),
   deleteProduct: (input: DeleteProductInput) => call('deleteProduct', input, saveResultSchema, QUICK_TIMEOUT_MS),
+  setPrice: (input: SetPriceInput) => call('setPrice', input, saveResultSchema, QUICK_TIMEOUT_MS),
 };
