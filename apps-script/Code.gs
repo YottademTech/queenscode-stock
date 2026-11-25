@@ -75,6 +75,10 @@ const MAX_BODY_LENGTH = 8000000;
 const MAX_ROWS_PER_SAVE = 60;
 // One count photo plus detail photos (front, back, markings) that Claude reads in the same request.
 const MAX_PHOTOS_PER_COUNT = 4;
+/** Photos kept for one product (front, side, top, base...), as Drive links one per line in Products!I. */
+const MAX_PHOTOS_PER_PRODUCT = 10;
+/** New product photos in one save, which keeps the request well under MAX_BODY_LENGTH. */
+const MAX_NEW_PHOTOS_PER_SAVE = 6;
 const MAX_QUANTITY = 1000000;
 
 const CLAUDE_URL = 'https://api.anthropic.com/v1/messages';
@@ -196,6 +200,8 @@ function bootstrap() {
     counted: readCountedToday(ss, settings, timeZone),
     // Tells the app that this script can read several photos in one request, and how many.
     photoSetLimit: MAX_PHOTOS_PER_COUNT,
+    // Tells the app that a product can hold several photos, and how many.
+    productPhotoLimit: MAX_PHOTOS_PER_PRODUCT,
     // What this deployed script can do, so the app only offers what will work.
     actions: Object.keys(ACTIONS),
   };
@@ -639,10 +645,17 @@ function saveCounts(request) {
   });
 }
 
+/**
+ * Adds or edits a product. Photos: `images` are new ones, added after `keepImageUrls`, the product's
+ * photos the person kept, in their order. A photo left out of `keepImageUrls` is removed from the
+ * product and moved to the Drive trash. Without `keepImageUrls` every existing photo stays. An app
+ * from before several photos sends one `image`, which is added the same way.
+ */
 function saveProduct(request) {
   const ss = spreadsheet();
   const input = parseProductInput(request.product);
-  const image = request.image === undefined || request.image === null ? null : parseImage(request.image);
+  const images = parseProductImages(request);
+  const keepRequested = request.keepImageUrls === undefined || request.keepImageUrls === null ? null : parseUrlList(request.keepImageUrls);
 
   return withWriteLock(ss, request, () => {
     const sheet = requireSheet(ss, SHEET.products);
@@ -662,26 +675,69 @@ function saveProduct(request) {
       code = makeProductCode(input.name, input.size, products.map((product) => product.code));
     }
 
-    const imageUrl = image ? storeProductImage(code, image) : null;
+    // Only links the product already has can be kept, so nothing else can be written into the cell.
+    const existingUrls = input.code ? products.filter((product) => product.code === code)[0].imageUrls : [];
+    const keptUrls = keepRequested === null ? existingUrls : keepRequested.filter((url) => existingUrls.indexOf(url) !== -1);
+    if (keptUrls.length + images.length > MAX_PHOTOS_PER_PRODUCT) {
+      throw new AppError('invalid_request', 'A product can have up to ' + MAX_PHOTOS_PER_PRODUCT + ' photos. Remove some before adding more.');
+    }
+    const removedUrls = existingUrls.filter((url) => keptUrls.indexOf(url) === -1);
+    const photosChange = images.length > 0 || removedUrls.length > 0;
+    const newUrls = images.map((image) => storeProductImage(code, image));
 
     if (input.code) {
       // Two columns are skipped. The name (B) stays because the Stock tab matches hand corrections
-      // by product name, and the photo link (I) is only replaced when a new photo was sent.
+      // by product name, and the photo links (I) are only rewritten when photos were added or removed.
       const cells = productCells(input);
       sheet.getRange(row, 3, 1, IMAGE_COLUMN - 3).setValues([cells.slice(2, IMAGE_COLUMN - 1)]);
       sheet.getRange(row, IMAGE_COLUMN + 1, 1, PRODUCT_COLUMN_COUNT - IMAGE_COLUMN).setValues([cells.slice(IMAGE_COLUMN)]);
     } else {
       writeNewProduct(sheet, row, Object.assign({}, input, { code: code }));
     }
-    if (imageUrl) sheet.getRange(row, IMAGE_COLUMN).setValue(imageUrl);
+    if (photosChange) sheet.getRange(row, IMAGE_COLUMN).setValue(keptUrls.concat(newUrls).join('\n'));
+    removedUrls.forEach(trashProductImage);
   });
+}
+
+function parseProductImages(request) {
+  if (request.images === undefined || request.images === null) {
+    return request.image === undefined || request.image === null ? [] : [parseImage(request.image)];
+  }
+  if (!Array.isArray(request.images) || request.images.length > MAX_NEW_PHOTOS_PER_SAVE) {
+    throw new AppError('invalid_request', 'Add at most ' + MAX_NEW_PHOTOS_PER_SAVE + ' photos at a time.');
+  }
+  return request.images.map(parseImage);
+}
+
+function parseUrlList(value) {
+  if (!Array.isArray(value) || value.length > MAX_PHOTOS_PER_PRODUCT) throw new AppError('invalid_request', 'The list of photos is not valid.');
+  return value.map((url) => String(url));
+}
+
+/** The photo links kept in one Products!I cell, one per line. */
+function photoLinks(cell) {
+  return String(cell).split(/\s*\n\s*/).map((url) => url.trim()).filter((url) => url !== '');
+}
+
+/**
+ * Moves a removed product photo to the Drive trash, where it can be restored for 30 days. Only
+ * files this script made can be touched (drive.file), and a failure here never undoes the save.
+ */
+function trashProductImage(url) {
+  const fileId = (/\/d\/([\w-]+)/.exec(url) || [])[1];
+  if (!fileId) return;
+  try {
+    Drive.Files.update({ trashed: true }, fileId);
+  } catch (error) {
+    console.error('Could not move a removed product photo to the trash: ' + (error && error.message ? error.message : error));
+  }
 }
 
 /**
  * Removes a product with everything counted for it, so a product added later under the same code
  * or name starts from nothing. The Products row is emptied, not removed, because each Stock row
  * mirrors the Products row at the same position; the next new product takes the empty row.
- * The product's photo stays in Drive.
+ * The product's photos stay in Drive.
  */
 function deleteProduct(request) {
   const ss = spreadsheet();
@@ -967,8 +1023,10 @@ function readProducts(ss) {
         code: String(cells[0]).trim(),
         packSize: numberOrNull(cells[4]),
         reorderLevel: numberOrNull(cells[5]),
-        imageUrl: String(cells[IMAGE_COLUMN - 1]).trim(),
+        imageUrls: photoLinks(cells[IMAGE_COLUMN - 1]),
       };
+      // The first photo is the one the product list shows, also for an app from before several photos.
+      product.imageUrl = product.imageUrls[0] || '';
       DETAIL_FIELDS.forEach((field) => {
         const cell = cells[field.column - 1];
         // A date typed into the Sheet by hand arrives as a Date; the app works with its text form.

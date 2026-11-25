@@ -1,5 +1,6 @@
-import { useId, useState, type ChangeEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from 'react';
 import type { Product } from '../api/contract';
+import { matchesSearch, productLabel } from '../products/search';
 import { Icon } from './Icon';
 
 type TextFieldProps = {
@@ -10,9 +11,10 @@ type TextFieldProps = {
   inputMode?: 'text' | 'numeric';
   readOnly?: boolean;
   hint?: string;
+  error?: string;
 };
 
-export function TextField({ label, value, onChange, placeholder, inputMode = 'text', readOnly = false, hint }: TextFieldProps) {
+export function TextField({ label, value, onChange, placeholder, inputMode = 'text', readOnly = false, hint, error }: TextFieldProps) {
   const id = useId();
   return (
     <div className="field">
@@ -24,9 +26,11 @@ export function TextField({ label, value, onChange, placeholder, inputMode = 'te
         value={value}
         placeholder={placeholder}
         readOnly={readOnly}
-        aria-describedby={hint ? `${id}-hint` : undefined}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={[error && `${id}-error`, hint && `${id}-hint`].filter(Boolean).join(' ') || undefined}
         onChange={(event) => onChange(event.target.value)}
       />
+      <FieldError id={`${id}-error`} error={error} />
       {hint && <p id={`${id}-hint`} className="hint">{hint}</p>}
     </div>
   );
@@ -45,10 +49,15 @@ export function TextAreaField({ label, value, onChange, rows, hint }: TextAreaFi
   );
 }
 
-type NumberFieldProps = { label: string; value: number | null; onChange: (value: number | null) => void; placeholder?: string };
+type NumberFieldProps = { label: string; value: number | null; onChange: (value: number | null) => void; placeholder?: string; error?: string };
+
+/** What is wrong with a field, shown under it and read out with it. */
+export function FieldError({ id, error }: { id: string; error?: string }) {
+  return error ? <p id={id} className="field-error">{error}</p> : null;
+}
 
 /** A whole number of zero or more. An empty box is null, so "not entered" stays distinct from 0. */
-export function NumberField({ label, value, onChange, placeholder }: NumberFieldProps) {
+export function NumberField({ label, value, onChange, placeholder, error }: NumberFieldProps) {
   const id = useId();
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
     const digits = event.target.value.replace(/\D/g, '').slice(0, 6);
@@ -57,7 +66,17 @@ export function NumberField({ label, value, onChange, placeholder }: NumberField
   return (
     <div className="field">
       <label htmlFor={id}>{label}</label>
-      <input id={id} type="text" inputMode="numeric" value={value ?? ''} placeholder={placeholder} onChange={handleChange} />
+      <input
+        id={id}
+        type="text"
+        inputMode="numeric"
+        value={value ?? ''}
+        placeholder={placeholder}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? `${id}-error` : undefined}
+        onChange={handleChange}
+      />
+      <FieldError id={`${id}-error`} error={error} />
     </div>
   );
 }
@@ -93,7 +112,6 @@ export function SwitchField({ label, hint, checked, onChange }: SwitchFieldProps
   );
 }
 
-const NEW_PRODUCT = '__new__';
 
 type ProductPickerProps = {
   label: string;
@@ -102,41 +120,121 @@ type ProductPickerProps = {
   value: string | null;
   onChange: (code: string | null) => void;
   allowNew: boolean;
+  error?: string;
 };
 
 /** A product list that can be narrowed by typing, built on a native select so it works on any phone. */
-export function ProductPicker({ label, products, value, onChange, allowNew }: ProductPickerProps) {
+/**
+ * A searchable dropdown of the products: typing in the field narrows the list under it, and a tap or
+ * Enter chooses one. It follows the ARIA combobox pattern, so arrow keys move through the list and
+ * Escape closes it. With `allowNew`, the first choice is "New product".
+ */
+export function ProductPicker({ label, products, value, onChange, allowNew, error }: ProductPickerProps) {
   const id = useId();
-  const [search, setSearch] = useState('');
+  const listId = `${id}-list`;
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [active, setActive] = useState(0);
+  const input = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLUListElement>(null);
 
-  const wanted = search.trim().toLowerCase();
-  const chosen = products.find((product) => product.code === value);
-  const matches = products.filter(
-    (product) => product.code === value || wanted === '' || `${product.name} ${product.size} ${product.code}`.toLowerCase().includes(wanted),
-  );
+  const chosen = products.find((product) => product.code === value) ?? null;
+  const NEW = { code: null, label: 'New product (not in the list)' } as const;
+  const options = [
+    ...(allowNew ? [NEW] : []),
+    ...products.filter((product) => matchesSearch(product, query)).map((product) => ({ code: product.code, label: productLabel(product) })),
+  ];
+  const shownText = chosen ? productLabel(chosen) : allowNew ? NEW.label : '';
+
+  const openList = () => {
+    // The list opens showing everything, with the current choice highlighted.
+    const at = value === null ? (allowNew ? 0 : -1) : products.findIndex((product) => product.code === value);
+    setQuery('');
+    setActive(Math.max(0, at === -1 ? 0 : at + (allowNew && value !== null ? 1 : 0)));
+    setOpen(true);
+  };
+  // The highlighted choice is scrolled into view when the list opens.
+  useEffect(() => {
+    if (open) list.current?.children[active]?.scrollIntoView({ block: 'nearest' });
+    // Only on opening: while open, the arrow keys scroll it themselves.
+  }, [open]);
+  const choose = (code: string | null) => {
+    onChange(code);
+    setOpen(false);
+  };
+  const moveTo = (index: number) => {
+    setActive(index);
+    list.current?.children[index]?.scrollIntoView({ block: 'nearest' });
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (!open) return openList();
+      if (options.length > 0) moveTo((active + (event.key === 'ArrowDown' ? 1 : options.length - 1)) % options.length);
+    } else if (event.key === 'Enter' && open) {
+      event.preventDefault();
+      const option = options[active];
+      if (option) choose(option.code);
+    } else if (event.key === 'Escape' && open) {
+      event.preventDefault();
+      setOpen(false);
+    }
+  };
 
   return (
-    <div className="field">
+    <div className="field product-picker">
       <label htmlFor={id}>{label}</label>
-      {products.length > 8 && (
+      <div className="picker-box">
         <input
-          type="search"
-          value={search}
-          placeholder="Type to narrow the list"
-          aria-label={`Search ${label.toLowerCase()}`}
-          onChange={(event) => setSearch(event.target.value)}
+          ref={input}
+          id={id}
+          type="text"
+          role="combobox"
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? `${id}-error` : undefined}
+          aria-activedescendant={open && options[active] ? `${id}-option-${active}` : undefined}
+          autoComplete="off"
+          placeholder={open ? 'Type to search' : 'Choose a product'}
+          value={open ? query : shownText}
+          // Opens on a tap, typing or the down arrow, not on focus alone: the form moves the focus here to
+          // show an error, and an open list would cover the message.
+          onClick={() => { if (!open) openList(); }}
+          onBlur={() => setOpen(false)}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setActive(0);
+            setOpen(true);
+          }}
+          onKeyDown={handleKeyDown}
         />
-      )}
-      <select id={id} value={value ?? (allowNew ? NEW_PRODUCT : '')} onChange={(event) => onChange(event.target.value === NEW_PRODUCT || event.target.value === '' ? null : event.target.value)}>
-        {allowNew ? <option value={NEW_PRODUCT}>New product (not in the list)</option> : <option value="">Choose a product</option>}
-        {matches.map((product) => (
-          <option key={product.code} value={product.code}>
-            {product.name}{product.size ? ` (${product.size})` : ''}
-          </option>
-        ))}
-      </select>
-      {/* A phone's select box cuts long names short, hiding the variant at the end. */}
-      {chosen && (
+        <span className="picker-chevron" aria-hidden="true" />
+        {open && (
+          <ul ref={list} id={listId} role="listbox" aria-label={label} className="picker-list">
+            {options.map((option, index) => (
+              <li
+                key={option.code ?? 'new'}
+                id={`${id}-option-${index}`}
+                role="option"
+                aria-selected={option.code === value}
+                className={`picker-option${index === active ? ' active' : ''}${option.code === null ? ' new' : ''}`}
+                // Chosen on press, before the field loses focus and closes the list.
+                onMouseDown={(event) => { event.preventDefault(); choose(option.code); }}
+                onMouseEnter={() => setActive(index)}
+              >
+                {option.label}
+              </li>
+            ))}
+            {options.length === (allowNew ? 1 : 0) && <li className="picker-empty" role="presentation">No product matches "{query.trim()}".</li>}
+          </ul>
+        )}
+      </div>
+      <FieldError id={`${id}-error`} error={error} />
+      {/* The field cuts long names short, hiding the variant at the end. */}
+      {chosen && !open && (
         <p className="chosen-product">
           {chosen.name}
           {chosen.size ? ` · ${chosen.size}` : ''}

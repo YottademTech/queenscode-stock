@@ -23,13 +23,18 @@ const productDetailsShape = {
   qrCode: z.string().default(''),
 };
 
-export const productSchema = z.object({
-  ...productDetailsShape,
-  code: z.string(),
-  packSize: z.number().nullable(),
-  reorderLevel: z.number().nullable(),
-  imageUrl: z.string(),
-});
+export const productSchema = z
+  .object({
+    ...productDetailsShape,
+    code: z.string(),
+    packSize: z.number().nullable(),
+    reorderLevel: z.number().nullable(),
+    /** The first photo, the one the product list shows. */
+    imageUrl: z.string(),
+    // Every photo of the product, in order. An Apps Script from before several photos sends only imageUrl.
+    imageUrls: z.array(z.string()).optional(),
+  })
+  .transform((product) => ({ ...product, imageUrls: product.imageUrls ?? (product.imageUrl ? [product.imageUrl] : []) }));
 export type Product = z.infer<typeof productSchema>;
 
 export const bootstrapSchema = z.object({
@@ -42,6 +47,9 @@ export const bootstrapSchema = z.object({
   // How many photos one count request may hold: the count photo plus detail photos. An Apps Script
   // from before photo sets does not say, and reads one photo.
   photoSetLimit: z.number().int().min(1).default(1),
+  // How many photos one product can hold. An Apps Script from before several photos keeps one, and
+  // replaces it when a new one is sent.
+  productPhotoLimit: z.number().int().min(1).default(1),
   // What the deployed Apps Script can do. One from before it said so offers nothing newer.
   actions: z.array(z.string()).default([]),
 });
@@ -136,5 +144,10 @@ export type DeleteProductInput = { requestId: string; productCode: string };
 export type SaveProductInput = {
   requestId: string;
   product: ProductDetails & { code: string | null; packSize: number | null; reorderLevel: number | null };
-  image: EncodedImage | null;
+  /** The one new photo, for an Apps Script that keeps one photo per product. */
+  image?: EncodedImage | null;
+  /** New photos, added after the kept ones. */
+  images?: EncodedImage[];
+  /** The product's photos to keep, in order; any other photo it had is removed. */
+  keepImageUrls?: string[];
 };

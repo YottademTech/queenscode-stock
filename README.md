@@ -24,6 +24,17 @@ Each row also has a **QR code** column for what a QR code on the pack holds. Cla
 for it, because a photo cannot be relied on to decode one: staff type, paste or scan it in. Like
 the barcode, it is optional.
 
+## Product photos
+
+A product can hold up to 10 photos, so each person can check what matters to them: the front, the
+sides, the top, the base. On a product's page they show one at a time across the full width; swipe,
+or use the arrows or dots. The camera and upload buttons add photos (upload takes several at once),
+and the X on a photo removes it. Nothing changes until **Save product** is tapped.
+
+The links are kept in the Products tab's photo column (I), one per line; the first is the one the
+product list shows. A removed photo goes to the Google Drive trash, where it can be restored for 30
+days. Until the new Apps Script is published, the app keeps one photo per product, as before.
+
 ## Deleting a product
 
 On the Products screen, open a product and tap **Delete product**, then confirm. The product is

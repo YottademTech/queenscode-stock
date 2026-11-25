@@ -28,6 +28,14 @@ describe('photo sets', () => {
     expect(bootstrapSchema.parse(bootstrap).photoSetLimit).toBe(1);
   });
 
+  it('reads every photo of a product, and makes a list of the one photo an older Apps Script sends', () => {
+    expect(productSchema.parse({ ...product(allDetails), imageUrl: 'a', imageUrls: ['a', 'b'] }).imageUrls).toEqual(['a', 'b']);
+    expect(productSchema.parse({ ...product(allDetails), imageUrl: 'a' }).imageUrls).toEqual(['a']);
+    expect(productSchema.parse(product(allDetails)).imageUrls).toEqual([]);
+    expect(bootstrapSchema.parse(bootstrap).productPhotoLimit).toBe(1);
+    expect(bootstrapSchema.parse({ ...bootstrap, productPhotoLimit: 10 }).productPhotoLimit).toBe(10);
+  });
+
   it('reads what the Apps Script can do, and assumes nothing newer of one that does not say', () => {
     expect(bootstrapSchema.parse({ ...bootstrap, actions: ['bootstrap', 'deleteProduct'] }).actions).toContain('deleteProduct');
     expect(bootstrapSchema.parse(bootstrap).actions).toEqual([]);

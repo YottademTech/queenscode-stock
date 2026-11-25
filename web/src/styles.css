@@ -330,6 +330,10 @@ label.button:focus-within { outline: 3px solid var(--ink); outline-offset: 2px; 
 .notice.info { background: var(--info-bg); color: #4a3a00; }
 
 .problems { color: var(--danger); font-size: 0.9rem; margin: 0.5rem 0; padding-left: 1.1rem; list-style: disc; }
+/* A message under the field it is about, with the field outlined to match. */
+.field-error { margin: 0.15rem 0 0; color: var(--danger); font-size: 0.86rem; font-weight: 600; line-height: 1.35; }
+.field-error::before { content: '! '; }
+:is(input, select, textarea)[aria-invalid='true'] { border-color: var(--danger); box-shadow: 0 0 0 0.2rem rgb(180 35 24 / 0.12); }
 
 /* Fold-away sections open with a chevron that turns, in place of the browser's triangle. */
 summary { list-style: none; display: flex; align-items: center; gap: 0.5rem; min-height: 3rem; font-weight: 600; cursor: pointer; border-radius: var(--round-s); }
@@ -341,8 +345,25 @@ summary::after {
 details[open] > summary::after { transform: translateY(0.25rem) rotate(-135deg); }
 .tips { background: rgb(212 175 55 / 0.13); border-radius: var(--round-m); padding: 0 1rem; margin: 0.85rem 0; }
 .tips ul { list-style: disc; padding: 0 0 0.9rem 1.1rem; color: #4d4737; font-size: 0.9rem; display: grid; gap: 0.3rem; }
-.disclosure { border-top: 1px solid var(--hairline); margin-top: 0.6rem; }
-.disclosure[open] { padding-bottom: 0.3rem; }
+/* "More details" is a gold-edged panel of its own, so the fields folded inside it are not overlooked. */
+.disclosure {
+  margin-top: 1rem; padding: 0 0.95rem; border-radius: var(--round-m);
+  border: 1.5px solid rgb(184 137 31 / 0.6); background: linear-gradient(135deg, rgb(247 224 138 / 0.32), rgb(212 175 55 / 0.12));
+  box-shadow: 0 8px 18px -14px rgb(130 96 16 / 0.6);
+}
+.disclosure[open] { padding-bottom: 0.6rem; background: var(--surface); }
+.disclosure > summary { min-height: 3.75rem; padding: 0.55rem 0; }
+.disclosure-title { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.disclosure-title > span { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; font-size: 1.02rem; color: var(--ink); }
+.disclosure-title small { font-weight: 500; font-size: 0.8rem; color: var(--muted); line-height: 1.3; }
+/* The chevron sits in a gold circle, like a button: the circle is drawn first and the chevron over it. */
+.disclosure > summary::after { width: 0.5rem; height: 0.5rem; border-color: var(--black); }
+.disclosure > summary::before {
+  content: ''; order: 2; flex: none; width: 2.1rem; height: 2.1rem; margin-left: auto; margin-right: -2.15rem; border-radius: 50%; background: var(--gold-shine);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.6);
+}
+.disclosure > summary::after { order: 3; margin-left: 0; margin-right: 0.8rem; }
+.disclosure .count-chip { color: var(--black); background: var(--gold-shine); }
 .count-chip { font-size: 0.75rem; font-weight: 600; color: var(--muted); background: rgb(54 40 8 / 0.07); border-radius: 10rem; padding: 0.1rem 0.6rem; }
 
 .photo-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: 0.75rem; margin: 0.75rem 0; }
@@ -383,6 +404,20 @@ details[open] > summary::after { transform: translateY(0.25rem) rotate(-135deg);
 .total strong { font-size: 1.5rem; font-variant-numeric: tabular-nums; }
 .total small { display: block; color: var(--muted); }
 .chosen-product { font-size: 0.85rem; color: var(--muted); margin: 0; }
+/* The searchable product dropdown: a field with a chevron, and the matches in a list that floats under it. */
+.picker-box { position: relative; }
+.product-picker input[type='text'] { width: 100%; padding-right: 2.75rem; text-overflow: ellipsis; cursor: pointer; }
+.product-picker input[type='text']:focus { cursor: text; }
+.picker-chevron { position: absolute; right: 1.1rem; top: 50%; width: 0.55rem; height: 0.55rem; margin-top: -0.4rem; border-right: 2px solid var(--gold-deep); border-bottom: 2px solid var(--gold-deep); transform: rotate(45deg); pointer-events: none; }
+.picker-list {
+  position: absolute; z-index: 4; left: 0; right: 0; top: calc(100% + 0.35rem); max-height: min(17rem, 45vh); overflow-y: auto; overscroll-behavior: contain;
+  padding: 0.35rem; background: var(--surface); border-radius: var(--round-m); box-shadow: var(--lift-high); border: 1px solid var(--hairline);
+}
+.picker-option { padding: 0.7rem 0.8rem; min-height: 2.75rem; border-radius: 0.8rem; cursor: pointer; line-height: 1.3; }
+.picker-option.active { background: var(--tint); }
+.picker-option[aria-selected='true'] { font-weight: 650; box-shadow: inset 0.2rem 0 0 var(--gold-deep); }
+.picker-option.new { color: var(--gold-deep); font-weight: 600; }
+.picker-empty { padding: 0.7rem 0.8rem; color: var(--muted); }
 
 .thumb { width: 3.4rem; height: 3.4rem; border-radius: 0.95rem; object-fit: cover; flex: none; background: var(--tint); }
 .thumb.placeholder { display: inline-flex; align-items: center; justify-content: center; color: var(--gold-deep); font-size: 1.2rem; }
@@ -408,6 +443,18 @@ details[open] > summary::after { transform: translateY(0.25rem) rotate(-135deg);
 .choice input { width: 1.25rem; height: 1.25rem; margin-top: 0.15rem; flex: none; accent-color: var(--gold-deep); }
 .choice span { display: flex; flex-direction: column; }
 .choice small { color: var(--muted); }
+
+/* The search above the products: a rounded field with a magnifier drawn in, and a clear button once typed in. */
+.product-search { position: relative; margin-top: 0.85rem; }
+.product-search input[type='search'] {
+  width: 100%; min-height: 3rem; border-radius: 10rem; padding-left: 2.75rem; padding-right: 3.25rem;
+  background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a17c1b' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='6.5'/%3E%3Cpath d='M16 16l4.5 4.5'/%3E%3C/svg%3E") no-repeat 1rem 50% / 1.15rem;
+}
+.product-search input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+.search-clear {
+  position: absolute; top: 50%; right: 0.2rem; transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center;
+  width: 2.75rem; height: 2.75rem; border-radius: 50%; border: 0; background: transparent; color: var(--muted); cursor: pointer;
+}
 
 /* The product list is a carousel: one row of cards, three in view, moved by a swipe or the arrows above it.
    The frame runs to the edges of the screen, so the cards get the room the page margins would take, and
@@ -480,13 +527,45 @@ details[open] > summary::after { transform: translateY(0.25rem) rotate(-135deg);
 .delete-product .notice p { margin: 0 0 0.75rem; }
 .button.danger { color: var(--danger); border-color: rgb(180 35 24 / 0.45); }
 .button.danger.filled { color: #fff; background: var(--danger); border-color: transparent; }
-.product-image { display: block; width: 100%; max-width: 10rem; margin-inline: auto; aspect-ratio: 1; object-fit: cover; border-radius: var(--round-m); background: var(--surface); box-shadow: var(--lift); }
-p.product-image.placeholder { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 0.9rem; }
+/* A product's photos: one at a time, running edge to edge across the form, each with an X to remove it. */
+.product-photo { padding: 0; background: none; }
+.photo-carousel { margin: 0.6rem calc(-1 * var(--pad)) 0; }
+.carousel-strip { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; scrollbar-width: none; }
+.carousel-strip::-webkit-scrollbar { display: none; }
+.carousel-slide { position: relative; flex: 0 0 100%; min-width: 0; scroll-snap-align: start; scroll-snap-stop: always; aspect-ratio: 1; background: var(--tint); }
+.carousel-slide img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.carousel-remove {
+  position: absolute; top: 0.6rem; right: 0.6rem; display: inline-flex; align-items: center; justify-content: center; width: 2.75rem; height: 2.75rem;
+  border-radius: 50%; border: 0; cursor: pointer; color: #fff; background: rgb(11 11 12 / 0.72); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  box-shadow: 0 6px 14px -6px rgb(0 0 0 / 0.6);
+}
+.carousel-remove:focus-visible { outline-color: var(--gold-bright); }
+.carousel-controls { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.6rem var(--pad) 0; }
+.carousel-dots { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.1rem; min-width: 0; }
+/* Each dot is a full-size target around a small visible dot. */
+.carousel-dot { width: 1.75rem; height: 2.75rem; padding: 0; border: 0; background: none; cursor: pointer; position: relative; }
+.carousel-dot::after { content: ''; position: absolute; inset: 50% auto auto 50%; width: 0.55rem; height: 0.55rem; transform: translate(-50%, -50%); border-radius: 50%; background: var(--field-line); transition: width 0.2s var(--ease), background-color 0.2s var(--ease); }
+.carousel-dot[aria-current='true']::after { width: 1.2rem; border-radius: 1rem; background: var(--gold-deep); }
+.carousel-count { margin: 0.3rem 0 0; text-align: center; font-size: 0.85rem; font-weight: 600; color: var(--muted); }
+.carousel-empty { margin: 0.6rem 0 0; padding: 2.2rem 1.2rem; text-align: center; color: var(--muted); background: var(--tint); border-radius: var(--round-m); }
+@media (prefers-reduced-motion: no-preference) { .carousel-strip { scroll-behavior: smooth; } }
 
 .heading-row { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
 .heading-row h2 { min-width: 0; }
 /* The button beside a title keeps its word whole; the title is what wraps. */
 .heading-row .button { flex: none; white-space: nowrap; }
+/* Pills that narrow the Stock list; the chosen one is filled, in the colour of its badge. */
+.filter-pills { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.85rem; }
+.filter-pill {
+  font: inherit; font-weight: 600; font-size: 0.92rem; display: inline-flex; align-items: center; gap: 0.5rem; min-height: 2.75rem; padding: 0 0.6rem 0 1.05rem;
+  border-radius: 10rem; border: 1px solid rgb(161 124 27 / 0.45); background: var(--surface); color: var(--ink); cursor: pointer;
+  transition: background-color 0.2s var(--ease), color 0.2s var(--ease), border-color 0.2s var(--ease);
+}
+.pill-count { min-width: 1.6rem; padding: 0.1rem 0.45rem; border-radius: 10rem; background: var(--tint); font-size: 0.8rem; text-align: center; font-variant-numeric: tabular-nums; }
+.filter-pill[aria-pressed='true'] { background: var(--black); color: #fff; border-color: transparent; }
+.filter-pill.check[aria-pressed='true'] { background: var(--danger); }
+.filter-pill.reorder[aria-pressed='true'] { background: var(--warn); }
+.filter-pill[aria-pressed='true'] .pill-count { background: rgb(255 255 255 / 0.22); color: #fff; }
 .stock-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: 0.85rem; margin-top: 0.85rem; }
 .stock-card { margin: 0; }
 .stock-card.needs-check { background: var(--danger-bg); box-shadow: inset 0 0 0 1.5px #f3c0ba, var(--lift); }

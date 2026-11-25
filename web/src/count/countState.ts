@@ -1,6 +1,6 @@
 import { DETAIL_KEYS, type Confidence, type CountAnalysis, type CountRowInput, type DetailKey, type EncodedImage, type Product, type ProductDetails } from '../api/contract';
 import type { PreparedPhoto } from '../lib/image';
-import { detailProblems, emptyDetails, pickDetails, trimDetails } from '../products/details';
+import { detailErrors, detailProblems, emptyDetails, pickDetails, trimDetails, type DetailErrors } from '../products/details';
 import type { Container } from './containers';
 
 export type PhotoStatus =
@@ -205,13 +205,22 @@ export function totalPieces(quantities: Quantities, product: Product | null): nu
   return quantities.fullCartons * (packSizeFor(quantities, product) ?? 0) + quantities.loosePieces;
 }
 
-/** Everything that would make the server refuse this row, in words the counter can act on. */
-export function rowProblems(row: CountRow, products: readonly Product[], unit: Container): string[] {
+export type RowErrors = { product?: string; packSize?: string; details: DetailErrors };
+
+/** Everything that would make the server refuse this row, by the field it is about. */
+export function rowErrors(row: CountRow, products: readonly Product[], unit: Container): RowErrors {
   const product = findProduct(products, row.productCode);
-  const problems = row.productCode === null ? detailProblems(row.newProduct) : [];
-  if (row.productCode !== null && !product) problems.push('This product is no longer in the Sheet. Choose it again.');
-  if (row.fullCartons > 0 && !packSizeFor(row, product)) problems.push(`Enter the pieces per ${unit.one}.`);
-  return problems;
+  return {
+    product: row.productCode !== null && !product ? 'This product is no longer in the Sheet. Choose it again.' : undefined,
+    packSize: row.fullCartons > 0 && !packSizeFor(row, product) ? `Enter the pieces per ${unit.one}.` : undefined,
+    details: row.productCode === null ? detailErrors(row.newProduct) : {},
+  };
+}
+
+/** The same checks as one list, in words the counter can act on. */
+export function rowProblems(row: CountRow, products: readonly Product[], unit: Container): string[] {
+  const errors = rowErrors(row, products, unit);
+  return [...Object.values(errors.details), errors.product, errors.packSize].filter((error): error is string => !!error);
 }
 
 export function savedCount(row: CountRow, products: readonly Product[], waitingForSignal: boolean): SavedCount {

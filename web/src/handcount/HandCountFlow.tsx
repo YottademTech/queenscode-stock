@@ -32,15 +32,33 @@ export function HandCountFlow({ bootstrap, counter, onSaved }: HandCountFlowProp
   const container = containerAt(location);
   const quantity = totalPieces(quantities, product);
 
-  const problems: string[] = [];
-  if (counter.trim() === '') problems.push('Sign in again with your name.');
-  if (!product) problems.push('Choose the product.');
-  if (quantities.fullCartons > 0 && !packSizeFor(quantities, product)) problems.push(`Enter the pieces per ${(container ?? ANY_PACK).one}.`);
-  if (kind !== 'correct' && quantity === 0) problems.push('Enter how many pieces to add or remove.');
+  // What is missing, by the field it belongs to. Shown under each field once Save has been tapped,
+  // and then kept up to date as the counter fills them in.
+  const packSizeMissing = quantities.fullCartons > 0 && !packSizeFor(quantities, product);
+  const errors = {
+    product: product ? undefined : 'Choose the product.',
+    packSize: packSizeMissing ? `Enter the pieces per ${(container ?? ANY_PACK).one}.` : undefined,
+    // Full packs with no size count as nothing yet; the message on the pack size already says why.
+    pieces: kind !== 'correct' && quantity === 0 && !packSizeMissing ? 'Enter how many pieces to add or remove.' : undefined,
+  };
+  const hasErrors = Object.values(errors).some(Boolean);
+  const [showErrors, setShowErrors] = useState(false);
+  const form = useRef<HTMLFormElement>(null);
+  const signedOut = counter.trim() === '';
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!product || problems.length > 0) return;
+    if (hasErrors) {
+      setShowErrors(true);
+      // Takes the counter to the first field that needs them, once its message is on screen.
+      window.requestAnimationFrame(() => {
+        const field = form.current?.querySelector<HTMLElement>('[aria-invalid="true"]');
+        field?.focus({ preventScroll: true });
+        field?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      });
+      return;
+    }
+    if (!product || signedOut) return;
 
     const content = { location, counter: counter.trim(), productCode: product.code, type: kind, quantity, reason: reason.trim() };
     const payload: AdjustmentInput = { requestId: requestIds.for(content), ...content };
@@ -61,6 +79,7 @@ export function HandCountFlow({ bootstrap, counter, onSaved }: HandCountFlowProp
       return;
     }
     requestIds.reset();
+    setShowErrors(false);
     setQuantities(noQuantities);
     setReason('');
     setProductCode(null);
@@ -77,9 +96,9 @@ export function HandCountFlow({ bootstrap, counter, onSaved }: HandCountFlowProp
       <h2 id="hand-heading">Adjustments</h2>
       <p className="hint">Use this to fix a photo count, or for stock a photo cannot show. It never uses Claude.</p>
 
-      <form onSubmit={handleSubmit} className="card">
+      <form ref={form} onSubmit={handleSubmit} className="card" noValidate>
         <SelectField label="Where are you counting from?" value={location} options={bootstrap.locations} onChange={setLocation} />
-        <ProductPicker label="Product" products={bootstrap.products} value={productCode} allowNew={false} onChange={setProductCode} />
+        <ProductPicker label="Product" products={bootstrap.products} value={productCode} allowNew={false} error={showErrors ? errors.product : undefined} onChange={setProductCode} />
 
         <fieldset className="choices">
           <legend>What is this entry?</legend>
@@ -99,6 +118,7 @@ export function HandCountFlow({ bootstrap, counter, onSaved }: HandCountFlowProp
           value={quantities}
           container={container}
           recordedPackSize={product?.packSize ?? null}
+          errors={showErrors ? { packSize: errors.packSize, pieces: errors.pieces } : {}}
           onChange={(change) => setQuantities({ ...quantities, ...change })}
         />
         <p className="total">
@@ -107,14 +127,8 @@ export function HandCountFlow({ bootstrap, counter, onSaved }: HandCountFlowProp
 
         <TextField label="Reason (optional)" value={reason} placeholder="Hidden behind other bottles, damaged, expired…" onChange={setReason} />
 
-        {problems.length > 0 && (
-          <ul className="problems" id="hand-problems">
-            {problems.map((problem) => (
-              <li key={problem}>{problem}</li>
-            ))}
-          </ul>
-        )}
-        <button type="submit" className="button primary wide" disabled={problems.length > 0 || isSaving} aria-describedby={problems.length > 0 ? 'hand-problems' : undefined}>
+        {signedOut && <p className="field-error">Sign in again with your name.</p>}
+        <button type="submit" className="button primary wide" disabled={isSaving || signedOut}>
           <Icon name="check" />
           {isSaving ? 'Saving…' : 'Save to the Sheet'}
         </button>

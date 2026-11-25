@@ -3,6 +3,7 @@ import type { Bootstrap, Product } from '../api/contract';
 import { driveThumbnail } from '../lib/image';
 import { NoticeBox, type Notice } from '../shared/fields';
 import { ProductForm } from './ProductForm';
+import { matchesSearch } from './search';
 import { Icon } from '../shared/Icon';
 
 /** Product cards in view at once in the carousel; the arrows move by this many. */
@@ -25,6 +26,7 @@ export function ProductsFlow({ bootstrap, onSaved }: ProductsFlowProps) {
   const [notice, setNotice] = useState<Notice | null>(null);
   // The first card in view. Kept while a product is open, so the carousel comes back where it was.
   const [first, setFirst] = useState(0);
+  const [search, setSearch] = useState('');
   const stripRef = useRef<HTMLUListElement>(null);
 
   /** The distance from one card to the next, read from the page so it follows the phone's width. */
@@ -58,6 +60,7 @@ export function ProductsFlow({ bootstrap, onSaved }: ProductsFlowProps) {
           product={product}
           countedPieces={countedPieces}
           canDelete={bootstrap.actions.includes('deleteProduct')}
+          photoLimit={bootstrap.productPhotoLimit}
           onDone={handleDone}
           onCancel={() => setEditing({ kind: 'list' })}
         />
@@ -65,7 +68,8 @@ export function ProductsFlow({ bootstrap, onSaved }: ProductsFlowProps) {
     );
   }
 
-  const total = bootstrap.products.length;
+  const found = bootstrap.products.filter((product) => matchesSearch(product, search));
+  const total = found.length;
   // The list can shrink while later cards are showing, for example after a delete.
   const shown = Math.min(first, Math.max(total - CARDS_IN_VIEW, 0));
   const anyMissing = bootstrap.products.some((product) => missingDetails(product).length > 0);
@@ -94,6 +98,35 @@ export function ProductsFlow({ bootstrap, onSaved }: ProductsFlowProps) {
       </div>
 
       {bootstrap.products.length === 0 && <p className="hint">No products yet. Add one, or count by photo and Claude will suggest them.</p>}
+      {bootstrap.products.length > 0 && (
+        <div className="product-search">
+          <label htmlFor="product-search" className="visually-hidden">Search products</label>
+          <input
+            id="product-search"
+            type="search"
+            placeholder="Search by name, size, brand or barcode"
+            autoComplete="off"
+            enterKeyHint="search"
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              // A new search starts at its first match.
+              setFirst(0);
+              stripRef.current?.scrollTo({ left: 0, behavior: 'instant' });
+            }}
+          />
+          {search !== '' && (
+            <button type="button" className="search-clear" aria-label="Clear the search" onClick={() => { setSearch(''); setFirst(0); stripRef.current?.scrollTo({ left: 0, behavior: 'instant' }); }}>
+              <Icon name="close" size={18} />
+            </button>
+          )}
+        </div>
+      )}
+      {search !== '' && (
+        <p className="hint" role="status" aria-live="polite">
+          {total === 0 ? `No product matches "${search.trim()}".` : `${total} ${total === 1 ? 'product matches' : 'products match'}.`}
+        </p>
+      )}
       {anyMissing && <p className="hint">A gold dot marks a product with no pack size, reorder level or photo yet.</p>}
 
       {/* Above the strip, where the thumb reaches them, with what is in view. */}
@@ -112,8 +145,8 @@ export function ProductsFlow({ bootstrap, onSaved }: ProductsFlowProps) {
       )}
 
       <div className="carousel-frame">
-      <ul className="product-carousel" ref={stripRef} onScroll={handleScroll} aria-label={`Products, ${total} in all`}>
-        {bootstrap.products.map((product) => {
+      <ul className="product-carousel" ref={stripRef} onScroll={handleScroll} aria-label={search === '' ? `Products, ${total} in all` : `Products matching the search, ${total}`}>
+        {found.map((product) => {
           const thumbnail = driveThumbnail(product.imageUrl, 400);
           const missing = missingDetails(product);
           const facts = [product.size, product.category].filter(Boolean).join(' · ');

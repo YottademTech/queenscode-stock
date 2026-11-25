@@ -5,7 +5,7 @@ import { ProductPicker, SelectField } from '../shared/fields';
 import { Icon } from '../shared/Icon';
 import { ANY_PACK, containerAt } from './containers';
 import { QuantityFields } from './QuantityFields';
-import { detailsToFill, findProduct, packSizeFor, totalPieces, type CountRow, type Quantities, type RowDetails } from './countState';
+import { detailsToFill, findProduct, packSizeFor, totalPieces, type CountRow, type Quantities, type RowDetails, type RowErrors } from './countState';
 
 type CountRowCardProps = {
   row: CountRow;
@@ -22,6 +22,8 @@ type CountRowCardProps = {
   onRemove: () => void;
   /** False inside the hand-count panel, which has its own title and close button. */
   showHead?: boolean;
+  /** Given, each problem shows under its own field instead of in the list at the end of the card. */
+  fieldErrors?: RowErrors;
 };
 
 export function CountRowCard(props: CountRowCardProps) {
@@ -51,12 +53,12 @@ export function CountRowCard(props: CountRowCardProps) {
 
       {row.note && <p className="row-note">{row.note}</p>}
 
-      <ProductPicker label="Product" products={products} value={row.productCode} allowNew onChange={(code) => props.onDetailsChange({ productCode: code })} />
+      <ProductPicker label="Product" products={products} value={row.productCode} allowNew error={props.fieldErrors?.product} onChange={(code) => props.onDetailsChange({ productCode: code })} />
 
       {row.productCode === null && (
         <fieldset className="new-product">
           <legend>New product details (added to the Products tab)</legend>
-          <ProductDetailFields value={row.newProduct} onChange={changeNewProduct} />
+          <ProductDetailFields value={row.newProduct} errors={props.fieldErrors?.details} onChange={changeNewProduct} />
         </fieldset>
       )}
 
@@ -66,7 +68,13 @@ export function CountRowCard(props: CountRowCardProps) {
         </p>
       )}
 
-      <QuantityFields value={row} container={container} recordedPackSize={product?.packSize ?? null} onChange={props.onQuantitiesChange} />
+      <QuantityFields
+        value={row}
+        container={container}
+        recordedPackSize={product?.packSize ?? null}
+        errors={props.fieldErrors ? { packSize: props.fieldErrors.packSize } : {}}
+        onChange={props.onQuantitiesChange}
+      />
 
       <div className="row-foot">
         <p className="total">
@@ -91,7 +99,7 @@ export function CountRowCard(props: CountRowCardProps) {
       {alreadyCounted > 0 && (
         <p className="hint warn">{alreadyCounted} pieces are already saved here for this stocktake. Saving adds this row on top.</p>
       )}
-      {problems.length > 0 && (
+      {problems.length > 0 && !props.fieldErrors && (
         <ul className="problems">
           {problems.map((problem) => (
             <li key={problem}>{problem}</li>

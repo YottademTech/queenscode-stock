@@ -146,7 +146,7 @@ export function App() {
         )}
 
         <main>
-          {load.kind === 'loading' && <p className="hint" role="status">Loading products from the Sheet…</p>}
+          {load.kind === 'loading' && <p className="hint" role="status">Loading products…</p>}
           {load.kind === 'failed' && (
             <div className="notice error" role="alert">
               <p>{load.message}</p>

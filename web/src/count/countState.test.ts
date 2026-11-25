@@ -11,7 +11,7 @@ const photo = (id: string, location = 'Warehouse sacks'): Photo => ({
 });
 
 const product = (overrides: Partial<Product> = {}): Product => ({
-  ...emptyDetails(), code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion', packSize: 12, reorderLevel: null, imageUrl: '', ...overrides,
+  ...emptyDetails(), code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion', packSize: 12, reorderLevel: null, imageUrl: '', imageUrls: [], ...overrides,
 });
 
 const analysis: CountAnalysis = {

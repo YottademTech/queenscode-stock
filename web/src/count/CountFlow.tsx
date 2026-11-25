@@ -10,7 +10,7 @@ import { CameraSheet, canUseCamera } from './CameraSheet';
 import { CountRowCard } from './CountRowCard';
 import { ANY_PACK, containerAt, countingHint } from './containers';
 import {
-  countReducer, handRow, emptyCount, groupByLocation, photoCount, rowProblems, rowsFromAnalysis, rowsPerProduct, savedCount,
+  countReducer, handRow, rowErrors, emptyCount, groupByLocation, photoCount, rowProblems, rowsFromAnalysis, rowsPerProduct, savedCount,
   toCountRowInput, type CountRow, type Photo,
 } from './countState';
 
@@ -54,6 +54,8 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
   // The row being filled in by hand, in the panel on the right. It joins the list only when added.
   const [handDraft, setHandDraft] = useState<CountRow | null>(null);
   const handPanel = useRef<HTMLDialogElement>(null);
+  // Errors in the panel show under their fields once Add has been tapped, then follow the typing.
+  const [showHandErrors, setShowHandErrors] = useState(false);
   const startedPhotoIds = useRef(new Set<string>());
   const requestIds = useRef(createRequestIds()).current;
 
@@ -202,7 +204,17 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
   const handDraftProblems = handDraft ? rowProblems(handDraft, bootstrap.products, containerAt(handDraft.location) ?? ANY_PACK) : [];
 
   const addHandRow = () => {
-    if (!handDraft || handDraftProblems.length > 0) return;
+    if (!handDraft) return;
+    if (handDraftProblems.length > 0) {
+      setShowHandErrors(true);
+      // Takes the counter to the first field that needs them, once its message is on screen.
+      window.requestAnimationFrame(() => {
+        const field = handPanel.current?.querySelector<HTMLElement>('[aria-invalid="true"]');
+        field?.focus({ preventScroll: true });
+        field?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      });
+      return;
+    }
     dispatch({ type: 'rowAdded', row: handDraft });
     closeHandPanel();
   };
@@ -347,10 +359,13 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
         <button
           type="button"
           className="button icon-button"
-          aria-label="Add a row by hand"
-          title="Add a row by hand"
+          aria-label="Add a product by hand"
+          title="Add a product by hand"
           aria-haspopup="dialog"
-          onClick={() => setHandDraft(handRow(newId(), location))}
+          onClick={() => {
+            setShowHandErrors(false);
+            setHandDraft(handRow(newId(), location));
+          }}
         >
           <Icon name="handPlus" size={28} />
         </button>
@@ -368,7 +383,7 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
         {handDraft && (
           <div className="drawer-panel">
             <div className="drawer-head">
-              <h3 id="hand-panel-title">Add a row by hand</h3>
+              <h3 id="hand-panel-title">Add a product by hand</h3>
               <button type="button" className="drawer-close" aria-label="Close without adding" onClick={closeHandPanel}>
                 <Icon name="close" size={22} />
               </button>
@@ -388,23 +403,13 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
                 onQuantitiesChange={(change) => setHandDraft((current) => (current ? { ...current, ...change } : current))}
                 onRemove={closeHandPanel}
                 showHead={false}
+                fieldErrors={showHandErrors ? rowErrors(handDraft, bootstrap.products, containerAt(handDraft.location) ?? ANY_PACK) : { details: {} }}
               />
             </ul>
             </div>
             {/* A footer of its own under the form, so the button never covers a field. */}
             <div className="drawer-foot">
-              {handDraftProblems.length > 0 && (
-                <ul className="problems" id="hand-panel-problems">
-                  {handDraftProblems.map((problem) => <li key={problem}>{problem}</li>)}
-                </ul>
-              )}
-              <button
-                type="button"
-                className="button primary wide"
-                disabled={handDraftProblems.length > 0}
-                aria-describedby={handDraftProblems.length > 0 ? 'hand-panel-problems' : undefined}
-                onClick={addHandRow}
-              >
+              <button type="button" className="button primary wide" onClick={addHandRow}>
                 <Icon name="plus" />
                 Add to the list
               </button>

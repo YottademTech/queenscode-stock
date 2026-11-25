@@ -376,7 +376,7 @@ test('every detail of a new product is stored in the Products tab and comes back
   ]);
 
   const saved = backend.post({ action: 'bootstrap' }).data.products[2];
-  assert.deepEqual(saved, { ...details, code: 'QBHRWT-200', packSize: null, reorderLevel: null, imageUrl: '' });
+  assert.deepEqual(saved, { ...details, code: 'QBHRWT-200', packSize: null, reorderLevel: null, imageUrl: '', imageUrls: [] });
 
   const tooLong = backend.post(saveCounts([countRow({ productCode: null, newProduct: { name: 'X', labelText: 'a'.repeat(5001) } })], { requestId: 'request-0003' }));
   assert.match(tooLong.error.message, /label text is too long/);
@@ -520,6 +520,65 @@ test('editing a product fills its details and photo but leaves its code and name
   assert.equal(withoutPhoto.ok, true);
   assert.deepEqual(backend.workbook.get('Products').rowValues(3, 21).slice(9), ['Rich Glow', '', '', '', '', '', '', '', '', '', 'RICH GLOW\nYELLOW TONE', '\'=HYPERLINK("http://evil")']);
   assert.deepEqual(productRows(backend.workbook)[1].slice(4), ['', '', 'Body oil', '2030-08-19', 'https://drive.google.com/file/d/file-1/view']);
+});
+
+const photoCell = (backend, row = 3) => backend.workbook.get('Products').rowValues(row, 9)[8];
+const link = (n) => `https://drive.google.com/file/d/file-${n}/view`;
+
+test('a product keeps several photos, in order, and the first is the one the list shows', () => {
+  const backend = loadBackend();
+  backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion' }, { images: [PHOTO, PHOTO, PHOTO] }));
+  assert.equal(photoCell(backend), [link(1), link(2), link(3)].join('\n'));
+
+  // More photos are added after the ones kept.
+  backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion' }, { requestId: 'request-0102', keepImageUrls: [link(1), link(2), link(3)], images: [PHOTO] }));
+  assert.equal(photoCell(backend), [link(1), link(2), link(3), link(4)].join('\n'));
+
+  const product = backend.post({ action: 'bootstrap' }).data.products.find((p) => p.code === 'RG-YEL');
+  assert.deepEqual(product.imageUrls, [link(1), link(2), link(3), link(4)]);
+  assert.equal(product.imageUrl, link(1));
+});
+
+test('a photo left out of the kept list is removed from the product and moved to the Drive trash', () => {
+  const backend = loadBackend();
+  backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion' }, { images: [PHOTO, PHOTO, PHOTO] }));
+
+  const reply = backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion' }, { requestId: 'request-0102', keepImageUrls: [link(3), link(1)], images: [] }));
+  assert.equal(reply.ok, true);
+  assert.equal(photoCell(backend), [link(3), link(1)].join('\n'));
+  assert.deepEqual(backend.recorded.driveUpdates, [{ fileId: 'file-2', trashed: true }]);
+
+  // A link the product never had cannot be written in, and a save without a list keeps every photo.
+  backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion' }, { requestId: 'request-0103', keepImageUrls: [link(3), 'https://evil.example/x', '=IMAGE("x")'] }));
+  assert.equal(photoCell(backend), link(3));
+  backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion', brand: 'Rich Glow' }, { requestId: 'request-0104' }));
+  assert.equal(photoCell(backend), link(3));
+
+  // Removing the last photo empties the cell.
+  backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion' }, { requestId: 'request-0105', keepImageUrls: [] }));
+  assert.equal(photoCell(backend), '');
+  assert.equal(backend.post({ action: 'bootstrap' }).data.products.find((p) => p.code === 'RG-YEL').imageUrl, '');
+});
+
+test('an app from before several photos still adds its one photo, without losing the others', () => {
+  const backend = loadBackend();
+  backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion' }, { images: [PHOTO, PHOTO] }));
+  backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion' }, { requestId: 'request-0102', image: PHOTO }));
+  assert.equal(photoCell(backend), [link(1), link(2), link(3)].join('\n'));
+  assert.equal(backend.post({ action: 'bootstrap' }).data.productPhotoLimit, 10);
+});
+
+test('too many photos for a product, or in one save, are refused before anything is stored', () => {
+  const backend = loadBackend();
+  const seven = new Array(7).fill(PHOTO);
+  assert.match(backend.post(saveProduct({}, { images: seven })).error.message, /at most 6 photos at a time/);
+
+  backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion' }, { requestId: 'request-0102', images: new Array(6).fill(PHOTO) }));
+  const kept = [1, 2, 3, 4, 5, 6].map(link);
+  const tooMany = backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion' }, { requestId: 'request-0103', keepImageUrls: kept, images: new Array(5).fill(PHOTO) }));
+  assert.match(tooMany.error.message, /up to 10 photos/);
+  assert.equal(backend.recorded.driveFiles.length, 6, 'nothing is uploaded for a refused save');
+  assert.equal(photoCell(backend), kept.join('\n'));
 });
 
 test('a product save is refused for a duplicate name, an unknown code, bad details or a full tab', () => {

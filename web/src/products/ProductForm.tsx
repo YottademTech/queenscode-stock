@@ -1,16 +1,21 @@
-import { useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useCallback, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { api } from '../api/client';
 import { DETAIL_KEYS, type Product, type ProductDetails } from '../api/contract';
 import { createRequestIds } from '../lib/id';
+import { newId } from '../lib/id';
 import { PRODUCT_PHOTO_EDGE, driveThumbnail, preparePhoto, type PreparedPhoto } from '../lib/image';
 import { NoticeBox, NumberField, type Notice } from '../shared/fields';
 import { Icon } from '../shared/Icon';
 import { detailProblems, emptyDetails, pickDetails, trimDetails } from './details';
+import { PhotoCarousel, type CarouselPhoto } from './PhotoCarousel';
 import { ProductDetailFields } from './ProductDetailFields';
 
 type FormValues = ProductDetails & { packSize: number | null; reorderLevel: number | null };
 
 type Activity = 'idle' | 'reading' | 'saving' | 'deleting';
+
+/** A photo added in this form, not saved yet. */
+type NewPhoto = PreparedPhoto & { key: string };
 
 type ProductFormProps = {
   /** The product being edited, or null to add a new one. */
@@ -19,18 +24,28 @@ type ProductFormProps = {
   countedPieces: number;
   /** False when the deployed Apps Script cannot delete products yet. */
   canDelete: boolean;
+  /**
+   * How many photos a product can hold. 1 means an Apps Script from before several photos: a new
+   * photo then replaces the old one, and a saved photo cannot be removed.
+   */
+  photoLimit: number;
   /** Called with a message for the list once the product is saved or deleted. */
   onDone: (message: string) => void;
   onCancel: () => void;
 };
 
-export function ProductForm({ product, countedPieces, canDelete, onDone, onCancel }: ProductFormProps) {
+export function ProductForm({ product, countedPieces, canDelete, photoLimit, onDone, onCancel }: ProductFormProps) {
   const [values, setValues] = useState<FormValues>({
     ...(product ? pickDetails(product) : emptyDetails()),
     packSize: product?.packSize ?? null,
     reorderLevel: product?.reorderLevel ?? null,
   });
-  const [photo, setPhoto] = useState<PreparedPhoto | null>(null);
+  // The saved photos still kept, in order, then the photos added here. Saving sends both lists.
+  const [kept, setKept] = useState<readonly string[]>(product?.imageUrls ?? []);
+  const [added, setAdded] = useState<readonly NewPhoto[]>([]);
+  const [showing, setShowing] = useState(0);
+  const [jumpTo, setJumpTo] = useState<number | undefined>(undefined);
+  const onePhotoOnly = photoLimit === 1;
   const [activity, setActivity] = useState<Activity>('idle');
   const [notice, setNotice] = useState<Notice | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -39,25 +54,64 @@ export function ProductForm({ product, countedPieces, canDelete, onDone, onCance
   const isWriting = activity === 'saving' || activity === 'deleting';
 
   const problems = detailProblems(values);
-  const savedPhotoUrl = product ? driveThumbnail(product.imageUrl, 400) : null;
   const change = (patch: Partial<FormValues>) => setValues((current) => ({ ...current, ...patch }));
 
+  // With one photo per product, a new photo is shown in place of the saved one it will replace.
+  const shownKept = onePhotoOnly && added.length > 0 ? [] : kept;
+  const photos: CarouselPhoto[] = [
+    ...shownKept.map((url, index) => ({
+      key: url,
+      src: driveThumbnail(url, 1000) ?? url,
+      alt: `Saved photo ${index + 1} of ${product?.name ?? 'the product'}`,
+      remote: true,
+      onRemove: onePhotoOnly ? undefined : () => setKept((current) => current.filter((keptUrl) => keptUrl !== url)),
+    })),
+    ...added.map((photo, index) => ({
+      key: photo.key,
+      src: photo.previewUrl,
+      alt: `New photo ${index + 1}, not saved yet`,
+      remote: false,
+      onRemove: () => setAdded((current) => current.filter((addedPhoto) => addedPhoto.key !== photo.key)),
+    })),
+  ];
+  // Only a photo added here can be read by Claude: a saved one is in Drive, not on this phone.
+  const photoInView = showing >= shownKept.length ? added[showing - shownKept.length] ?? null : null;
+  const handleShowing = useCallback((index: number) => setShowing(index), []);
+
   const handlePhoto = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+    const files = Array.from(event.target.files ?? []);
     // Clearing the input lets the same photo be picked again.
     event.target.value = '';
-    if (!file) return;
-    try {
-      setPhoto(await preparePhoto(file, PRODUCT_PHOTO_EDGE));
-      setNotice(null);
-      // The photo buttons float over the form, so bring the new photo into view wherever it was scrolled to.
-      photoSection.current?.scrollIntoView({ block: 'start' });
-    } catch {
-      setNotice({ tone: 'error', text: 'That file could not be opened as a photo.' });
+    if (files.length === 0) return;
+
+    const room = onePhotoOnly ? 1 : photoLimit - kept.length - added.length;
+    if (room <= 0) {
+      setNotice({ tone: 'error', text: `A product can have up to ${photoLimit} photos. Remove one with its X before adding another.` });
+      return;
     }
+    const prepared: NewPhoto[] = [];
+    for (const file of files.slice(0, room)) {
+      try {
+        prepared.push({ ...(await preparePhoto(file, PRODUCT_PHOTO_EDGE)), key: newId() });
+      } catch {
+        setNotice({ tone: 'error', text: 'A file could not be opened as a photo.' });
+      }
+    }
+    if (prepared.length === 0) return;
+    const nextAdded = onePhotoOnly ? prepared.slice(-1) : [...added, ...prepared];
+    setAdded(nextAdded);
+    setNotice(
+      files.length > room
+        ? { tone: 'error', text: `Only ${room} more ${room === 1 ? 'photo fits' : 'photos fit'}: a product can have up to ${photoLimit}.` }
+        : null,
+    );
+    // Shows the first new photo, and brings the photos into view wherever the form was scrolled to.
+    setJumpTo((onePhotoOnly ? 0 : kept.length) + nextAdded.length - prepared.length);
+    photoSection.current?.scrollIntoView({ block: 'start' });
   };
 
   const handleReadPhoto = async () => {
+    const photo = photoInView;
     if (!photo) return;
     setActivity('reading');
     setNotice(null);
@@ -91,7 +145,9 @@ export function ProductForm({ product, countedPieces, canDelete, onDone, onCance
         packSize: values.packSize,
         reorderLevel: values.reorderLevel,
       },
-      image: photo?.image ?? null,
+      ...(onePhotoOnly
+        ? { image: added[0]?.image ?? null }
+        : { keepImageUrls: [...kept], images: added.map((photo) => photo.image) }),
     };
 
     setActivity('saving');
@@ -133,7 +189,7 @@ export function ProductForm({ product, countedPieces, canDelete, onDone, onCance
         <label className="float-button" title="Upload a photo">
           <Icon name="image" size={24} />
           <span className="visually-hidden">Upload a product photo</span>
-          <input type="file" accept="image/*" className="visually-hidden" disabled={activity !== 'idle'} onChange={handlePhoto} />
+          <input type="file" accept="image/*" multiple={!onePhotoOnly} className="visually-hidden" disabled={activity !== 'idle'} onChange={handlePhoto} />
         </label>
         <label className="float-button primary" title="Take a photo">
           <Icon name="camera" size={24} />
@@ -144,16 +200,18 @@ export function ProductForm({ product, countedPieces, canDelete, onDone, onCance
       <h3>{product ? `Edit ${product.name}` : 'Add a product'}</h3>
 
       <fieldset className="product-photo" ref={photoSection}>
-        <legend>Product photo</legend>
-        <p className="hint">A clean photo of one item, front label showing. Use the camera or upload button at the bottom right. It is stored in Google Drive, separately from count photos.</p>
-        {photo ? (
-          <img src={photo.previewUrl} alt="New product photo" className="product-image" />
-        ) : savedPhotoUrl ? (
-          <img src={savedPhotoUrl} alt={`Current photo of ${product?.name ?? 'the product'}`} className="product-image" referrerPolicy="no-referrer" />
-        ) : (
-          <p className="product-image placeholder">No photo yet</p>
+        <legend>{onePhotoOnly ? 'Product photo' : 'Product photos'}</legend>
+        <p className="hint">
+          {onePhotoOnly
+            ? 'A clean photo of one item, front label showing. Use the camera or upload button at the bottom right.'
+            : `Up to ${photoLimit}: the front, sides, top, base or anything else worth checking. Add them with the camera or upload button at the bottom right; the X removes one.`}{' '}
+          Stored in Google Drive, separately from count photos.
+        </p>
+        <PhotoCarousel photos={photos} onShowing={handleShowing} showIndex={jumpTo} />
+        {(kept.length !== (product?.imageUrls.length ?? 0) || added.length > 0) && (
+          <p className="hint warn">Photo changes are kept when you tap Save product.</p>
         )}
-        {photo && (
+        {photoInView && (
           <button type="button" className="button" disabled={activity !== 'idle'} onClick={handleReadPhoto}>
             <Icon name="sparkle" />
             {activity === 'reading' ? 'Claude is reading the label…' : 'Read all details from this photo'}

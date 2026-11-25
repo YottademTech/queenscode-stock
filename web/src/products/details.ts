@@ -22,19 +22,24 @@ const QR_CODE_MAX = 2000;
 
 const DAY_OR_MONTH = /^\d{4}-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?$/;
 
-/** What the server would refuse, in words the person filling the form can act on. */
-export function detailProblems(details: ProductDetails): string[] {
-  const problems: string[] = [];
-  if (details.name.trim() === '') problems.push('Enter the product name.');
-  if (!/^\d*$/.test(details.barcode.trim())) problems.push('The barcode must be digits only.');
-  if (details.qrCode.trim().length > QR_CODE_MAX) problems.push(`The QR code text is too long (max ${QR_CODE_MAX} characters).`);
-  if (details.expiry.trim() !== '' && !DAY_OR_MONTH.test(details.expiry.trim())) {
-    problems.push('Write the expiry as YYYY-MM-DD or YYYY-MM.');
-  }
+export type DetailErrors = Partial<Record<DetailKey, string>>;
+
+/** What the server would refuse, by the field it is about, in words the person filling the form can act on. */
+export function detailErrors(details: ProductDetails): DetailErrors {
+  const errors: DetailErrors = {};
+  if (details.name.trim() === '') errors.name = 'Enter the product name.';
+  if (!/^\d*$/.test(details.barcode.trim())) errors.barcode = 'The barcode must be digits only.';
+  if (details.qrCode.trim().length > QR_CODE_MAX) errors.qrCode = `The QR code text is too long (max ${QR_CODE_MAX} characters).`;
+  if (details.expiry.trim() !== '' && !DAY_OR_MONTH.test(details.expiry.trim())) errors.expiry = 'Write the expiry as YYYY-MM-DD or YYYY-MM.';
   if (details.manufactureDate.trim() !== '' && !DAY_OR_MONTH.test(details.manufactureDate.trim())) {
-    problems.push('Write the manufacture date as YYYY-MM-DD or YYYY-MM.');
+    errors.manufactureDate = 'Write the manufacture date as YYYY-MM-DD or YYYY-MM.';
   }
-  return problems;
+  return errors;
+}
+
+/** The same checks as one list, for a summary. */
+export function detailProblems(details: ProductDetails): string[] {
+  return Object.values(detailErrors(details)).filter((error): error is string => !!error);
 }
 
 type DetailField = { key: DetailKey; label: string; placeholder?: string; numeric?: boolean };

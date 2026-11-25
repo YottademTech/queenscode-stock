@@ -146,7 +146,7 @@ export function loadBackend({ workbook = makeWorkbook(), properties = {}, claude
   const store = new Map(Object.entries({
     APP_SECRET: SECRET, CLAUDE_API_KEY: 'sk-test', IMAGE_FOLDER_ID: 'folder-1', ...properties,
   }).filter(([, value]) => value !== null));
-  const recorded = { claudeRequests: [], driveFiles: [], folders: [], lockHeld: false, errors: [] };
+  const recorded = { claudeRequests: [], driveFiles: [], driveUpdates: [], folders: [], lockHeld: false, errors: [] };
 
   const context = vm.createContext({
     console: { log() {}, error: (message) => recorded.errors.push(String(message)) },
@@ -198,6 +198,10 @@ export function loadBackend({ workbook = makeWorkbook(), properties = {}, claude
           }
           recorded.driveFiles.push({ folderId: resource.parents[0], name: resource.name, mediaType: blob.mediaType, bytes: blob.bytes });
           return { id: `file-${recorded.driveFiles.length}` };
+        },
+        update: (resource, fileId) => {
+          recorded.driveUpdates.push({ fileId, ...resource });
+          return { id: fileId };
         },
       },
       Permissions: {

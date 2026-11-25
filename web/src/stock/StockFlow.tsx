@@ -5,9 +5,20 @@ import { formatDay } from '../lib/day';
 import { Icon } from '../shared/Icon';
 
 type StockLoad = { kind: 'loading' } | { kind: 'failed'; message: string } | { kind: 'ready'; stock: Stock };
+type StockRow = Stock['rows'][number];
+
+/** The pills above the list: everything, or only the rows that need something done. */
+const FILTERS = [
+  { id: 'all', label: 'All', keeps: () => true },
+  { id: 'check', label: 'Check', keeps: (row: StockRow) => row.review === 'CHECK' },
+  { id: 'reorder', label: 'Reorder', keeps: (row: StockRow) => row.status === 'REORDER' },
+] as const;
+type FilterId = (typeof FILTERS)[number]['id'];
 
 export function StockFlow({ countDate }: { countDate: string }) {
   const [load, setLoad] = useState<StockLoad>({ kind: 'loading' });
+  // Kept through a refresh, so a counter working through the CHECK rows stays on them.
+  const [filter, setFilter] = useState<FilterId>('all');
 
   const refresh = useCallback(async () => {
     setLoad({ kind: 'loading' });
@@ -20,6 +31,9 @@ export function StockFlow({ countDate }: { countDate: string }) {
     void refresh();
   }, [refresh]);
 
+
+  const keeps = FILTERS.find((option) => option.id === filter)?.keeps ?? (() => true);
+  const shownRows = load.kind === 'ready' ? load.stock.rows.filter(keeps) : [];
 
   return (
     <section aria-labelledby="stock-heading">
@@ -40,11 +54,32 @@ export function StockFlow({ countDate }: { countDate: string }) {
       {load.kind === 'ready' && load.stock.rows.length > 0 && (
         <>
           <p className="hint">
-            <span className="badge low">CHECK</span> Claude was unsure and nobody has counted by hand yet.{' '}
+            <span className="badge low">CHECK</span> needs a second check: count it by hand.{' '}
             <span className="badge reorder">REORDER</span> stock is at or below the reorder level.
           </p>
+          <div className="filter-pills" role="group" aria-label="Show">
+            {FILTERS.map((option) => {
+              const count = load.stock.rows.filter(option.keeps).length;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={`filter-pill ${option.id}`}
+                  aria-pressed={filter === option.id}
+                  // Tapping the chosen pill again goes back to everything.
+                  onClick={() => setFilter(filter === option.id ? 'all' : option.id)}
+                >
+                  {option.label}
+                  <span className="pill-count">{count}</span>
+                </button>
+              );
+            })}
+          </div>
+          {shownRows.length === 0 && (
+            <p className="hint" role="status">{filter === 'check' ? 'Nothing needs a second check.' : 'Nothing is at or below its reorder level.'}</p>
+          )}
           <ul className="stock-list">
-            {load.stock.rows.map((row) => (
+            {shownRows.map((row) => (
               <li key={row.code} className={`card stock-card${row.review === 'CHECK' ? ' needs-check' : ''}`}>
                 <div className="stock-head">
                   <strong className="stock-name">{row.name}</strong>
