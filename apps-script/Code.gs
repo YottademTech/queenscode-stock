@@ -440,7 +440,7 @@ function countQuestion(location, products, detailPhotoCount) {
 /** Claude's answer is untrusted input: codes are checked against the sheet and numbers are bounded. */
 function cleanCountAnswer(answer, products) {
   if (!isRecord(answer) || !Array.isArray(answer.items)) {
-    throw new AppError('claude_unavailable', 'Claude sent an answer the app could not read. Try the photo again.');
+    throw new AppError('claude_unavailable', 'The photo could not be read this time. Try the photo again.');
   }
   const knownCodes = products.map((product) => product.code);
 
@@ -512,10 +512,10 @@ function askClaude(options) {
   const message = fetchClaudeMessage(apiKey, payload);
 
   if (message.stop_reason === 'refusal') {
-    throw new AppError('claude_declined', 'Claude declined to read this photo. Count it by hand.');
+    throw new AppError('claude_declined', 'This photo could not be read. Count it by hand.');
   }
   if (message.stop_reason === 'max_tokens') {
-    throw new AppError('claude_unavailable', 'Claude\'s answer was cut off. Try a photo with fewer products.');
+    throw new AppError('claude_unavailable', 'The answer was cut off. Try a photo with fewer products.');
   }
 
   // Thinking blocks can come first, so the answer is found by type, not position.
@@ -526,7 +526,7 @@ function askClaude(options) {
   try {
     return JSON.parse(answerText);
   } catch (parseError) {
-    throw new AppError('claude_unavailable', 'Claude sent an answer the app could not read. Try the photo again.');
+    throw new AppError('claude_unavailable', 'The photo could not be read this time. Try the photo again.');
   }
 }
 
@@ -567,23 +567,23 @@ function fetchClaudeMessage(apiKey, payload) {
     if (status === 200) return parseJsonOrFail(body);
 
     if (status === 401 || status === 403) {
-      throw new AppError('not_configured', 'The Claude API key was rejected. Check CLAUDE_API_KEY in Script Properties.');
+      throw new AppError('not_configured', 'The API key was rejected. Check CLAUDE_API_KEY in Script Properties.');
     }
     const retryable = status === 0 || status === 429 || status >= 500;
     if (status !== 0) console.error('Claude replied ' + status + ': ' + claudeErrorSummary(body));
     if (!retryable) {
-      throw new AppError('claude_unavailable', 'Claude could not read this photo (error ' + status + ').');
+      throw new AppError('claude_unavailable', 'This photo could not be read (error ' + status + ').');
     }
     if (attempt < CLAUDE_ATTEMPTS) Utilities.sleep(1000 * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 500));
   }
-  throw new AppError('claude_unavailable', 'Claude is busy or unreachable. Wait a moment and try again.');
+  throw new AppError('claude_unavailable', 'The photo reader is busy or unreachable. Wait a moment and try again.');
 }
 
 function parseJsonOrFail(text) {
   try {
     return JSON.parse(text);
   } catch (parseError) {
-    throw new AppError('claude_unavailable', 'Claude sent an answer the app could not read. Try the photo again.');
+    throw new AppError('claude_unavailable', 'The photo could not be read this time. Try the photo again.');
   }
 }
 

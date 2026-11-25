@@ -131,7 +131,7 @@ export function ProductForm({ product, countedPieces, canDelete, photoLimit, onD
       }
       return filled;
     });
-    setNotice({ tone: 'info', text: read.note || 'Everything Claude could read is filled in, including under More details. Check it before saving.' });
+    setNotice({ tone: 'info', text: read.note || 'Everything that could be read is filled in, including under More details. Check it before saving.' });
   };
 
   const handleSubmit = async (event: FormEvent) => {
@@ -214,7 +214,7 @@ export function ProductForm({ product, countedPieces, canDelete, photoLimit, onD
         {photoInView && (
           <button type="button" className="button" disabled={activity !== 'idle'} onClick={handleReadPhoto}>
             <Icon name="sparkle" />
-            {activity === 'reading' ? 'Claude is reading the label…' : 'Read all details from this photo'}
+            {activity === 'reading' ? 'Processing…' : 'Read all details from this photo'}
           </button>
         )}
       </fieldset>

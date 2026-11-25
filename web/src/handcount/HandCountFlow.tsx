@@ -94,7 +94,7 @@ export function HandCountFlow({ bootstrap, counter, onSaved }: HandCountFlowProp
   return (
     <section aria-labelledby="hand-heading">
       <h2 id="hand-heading">Adjustments</h2>
-      <p className="hint">Use this to fix a photo count, or for stock a photo cannot show. It never uses Claude.</p>
+      <p className="hint">Use this to fix a photo count, or for stock a photo cannot show.</p>
 
       <form ref={form} onSubmit={handleSubmit} className="card" noValidate>
         <SelectField label="Where are you counting from?" value={location} options={bootstrap.locations} onChange={setLocation} />

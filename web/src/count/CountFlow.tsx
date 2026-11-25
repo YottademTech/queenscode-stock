@@ -240,18 +240,18 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
       {setLimit > 1 && (
         <SwitchField
           label="Add front and back photos"
-          hint={`The first photo is counted. Up to ${setLimit - 1} more of the same product, such as its front and back, let Claude fill in its details in the same request.`}
+          hint={`The first photo is counted. Up to ${setLimit - 1} more of the same product, such as its front and back, fill in its details in the same request.`}
           checked={photoSets}
           onChange={handlePhotoSetsChange}
         />
       )}
 
       <details className="tips">
-        <summary>How to take a photo Claude can count</summary>
+        <summary>How to take a photo that can be counted</summary>
         <ul>
-          <li>One product per photo is counted in a few seconds. A whole shelf of different products takes Claude about half a minute.</li>
+          <li>One product per photo is counted in a few seconds. A whole shelf of different products takes about half a minute.</li>
           <li>Straight on or from above, with a single layer visible. Stand bottles upright.</li>
-          <li>Bags and sacks: step back so every one in the pile shows. Claude counts the full ones; you enter the pieces in each.</li>
+          <li>Bags and sacks: step back so every one in the pile shows. The full ones are counted; you enter the pieces in each.</li>
           <li>Open bags and sacks are not full ones. Count what is left inside as loose pieces.</li>
           <li>Keep variants apart. Rich Glow black and Rich Glow yellow are different products.</li>
           {setLimit > 1 && <li>With front and back photos on: take the stock first, then close-ups of one item, label filling the frame. Only the first photo is counted.</li>}
@@ -294,7 +294,7 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
                   ? 'This photo is counted. Add the front and back of the product, then count the set.'
                   : `Counted photo plus ${plural(photo.details.length, 'detail photo', 'detail photos')}. Tap a detail photo to remove it.`)}
                 {photo.status.kind === 'waiting' && 'Waiting its turn'}
-                {photo.status.kind === 'reading' && 'Claude is counting…'}
+                {photo.status.kind === 'reading' && 'Processing…'}
                 {photo.status.kind === 'done' && (photo.status.note || 'Counted')}
                 {photo.status.kind === 'failed' && (
                   <span className="error-text">

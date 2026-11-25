@@ -97,7 +97,7 @@ export function ProductsFlow({ bootstrap, onSaved }: ProductsFlowProps) {
         </button>
       </div>
 
-      {bootstrap.products.length === 0 && <p className="hint">No products yet. Add one, or count by photo and Claude will suggest them.</p>}
+      {bootstrap.products.length === 0 && <p className="hint">No products yet. Add one, or count by photo and new products will be suggested.</p>}
       {bootstrap.products.length > 0 && (
         <div className="product-search">
           <label htmlFor="product-search" className="visually-hidden">Search products</label>
