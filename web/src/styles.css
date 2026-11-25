@@ -409,31 +409,39 @@ details[open] > summary::after { transform: translateY(0.25rem) rotate(-135deg);
 .choice span { display: flex; flex-direction: column; }
 .choice small { color: var(--muted); }
 
-/* The product list is a strip of slides, twenty products each, moved by a swipe or the arrows under it.
-   Slides carry their own padding so the tiles' shadows are not cut off by the strip. */
-.product-slides {
-  display: flex; align-items: flex-start; overflow-x: auto; scroll-snap-type: x mandatory; overscroll-behavior-x: contain;
-  margin: 0.5rem -0.5rem 0; scrollbar-width: none;
+/* The product list is a carousel: one row of cards, three in view, moved by a swipe or the arrows above it.
+   The frame runs to the edges of the screen, so the cards get the room the page margins would take, and
+   the padding keeps the first and last card in line with the rest of the page and their shadows uncut.
+   The frame is a size container: the cards are sized from its width (cqi), and its width comes only from
+   the page. Sized any other way, a long row can widen the page while it is first laid out, and a phone
+   then zooms out to fit it, taking the menu and navigation off the screen. */
+.carousel-frame { container-type: inline-size; margin: 0.6rem calc(-1 * var(--gutter)) 0; }
+.product-carousel {
+  --carousel-gap: 0.7rem;
+  display: flex; gap: var(--carousel-gap); overflow-x: auto; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; scrollbar-width: none;
+  padding: 0.5rem var(--gutter) 0.9rem; scroll-padding-inline: var(--gutter);
 }
-.product-slides::-webkit-scrollbar { display: none; }
-.product-slide {
-  flex: 0 0 100%; scroll-snap-align: start; scroll-snap-stop: always; padding: 0.5rem;
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(4.4rem, 1fr)); gap: 0.6rem 0.5rem; align-items: start;
+.product-carousel::-webkit-scrollbar { display: none; }
+/* min-width 0: a long size or category is cut short with an ellipsis instead of widening its card. */
+.product-carousel > li { flex: 0 0 calc((100cqi - 2 * var(--gutter) - 2 * var(--carousel-gap)) / 3); min-width: 0; scroll-snap-align: start; }
+/* Positioned, so the screen-reader text inside it (absolutely placed) stays in the card and is clipped
+   by the carousel instead of sitting far off to the right of the page and widening it. */
+.product-card {
+  position: relative; font: inherit; width: 100%; height: 100%; display: flex; flex-direction: column; gap: 0.55rem; padding: 0.4rem 0.4rem 0.75rem;
+  background: var(--surface); color: var(--ink); border: 0; border-radius: 1.25rem; box-shadow: var(--lift); cursor: pointer;
+  text-align: left; transition: transform 0.18s var(--ease);
 }
-.product-tile {
-  font: inherit; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 0.35rem; padding: 0.3rem 0.2rem 0.45rem;
-  background: var(--surface); color: var(--ink); border: 0; border-radius: 1.1rem; box-shadow: var(--lift); cursor: pointer;
-  text-align: center; transition: transform 0.18s var(--ease);
-}
-.product-tile:active { transform: scale(0.96); }
-.product-tile strong {
-  font-size: 0.74rem; font-weight: 600; line-height: 1.2; min-height: 2.4em; overflow: hidden;
+.product-card:active { transform: scale(0.97); }
+.card-photo { position: relative; display: block; width: 100%; aspect-ratio: 1; }
+.card-photo img, .card-placeholder { display: block; width: 100%; height: 100%; border-radius: 0.95rem; object-fit: cover; background: var(--tint); }
+.card-placeholder { display: flex; align-items: center; justify-content: center; color: var(--gold-deep); font-size: 1.5rem; }
+.card-flag { position: absolute; top: 0.35rem; right: 0.35rem; width: 0.75rem; height: 0.75rem; border-radius: 50%; background: var(--gold-bright); box-shadow: 0 0 0 2px var(--surface); }
+.card-text { display: flex; flex-direction: column; gap: 0.2rem; padding: 0 0.3rem; min-width: 0; width: 100%; }
+.card-text strong {
+  font-size: 0.86rem; font-weight: 650; line-height: 1.25; overflow: hidden;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3;
 }
-.tile-photo { position: relative; display: block; width: 100%; aspect-ratio: 1; }
-.tile-photo img, .tile-placeholder { display: block; width: 100%; height: 100%; border-radius: 0.9rem; object-fit: cover; background: var(--tint); }
-.tile-placeholder { display: flex; align-items: center; justify-content: center; color: var(--gold-deep); font-size: 1.2rem; }
-.tile-flag { position: absolute; top: 0.25rem; right: 0.25rem; width: 0.7rem; height: 0.7rem; border-radius: 50%; background: var(--gold-bright); box-shadow: 0 0 0 2px var(--surface); }
+.card-text small { font-size: 0.75rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .slide-controls { display: flex; align-items: center; justify-content: space-between; gap: 0.9rem; margin-top: 0.85rem; }
 .slide-controls p { margin: 0; min-width: 7.5rem; text-align: center; font-size: 0.9rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 .slide-button {
@@ -442,7 +450,7 @@ details[open] > summary::after { transform: translateY(0.25rem) rotate(-135deg);
 }
 .slide-button:disabled { opacity: 0.35; cursor: not-allowed; }
 @media (prefers-reduced-motion: no-preference) {
-  .product-slides { scroll-behavior: smooth; }
+  .product-carousel { scroll-behavior: smooth; }
 }
 
 /* Round buttons that float over a product's details, above the navigation: back to the list on the
@@ -555,7 +563,7 @@ main > div:not([hidden]) > section, main > section { animation: screen-in 0.36s 
 /* A moving ancestor would carry the floating buttons with it, so a product's details only fade in. */
 @keyframes fade-in { from { opacity: 0; } }
 main > div:not([hidden]) > section.product-details { animation-name: fade-in; }
-.row-card, .photo, .saved-list li, .notice, .stock-card, .product-tile { animation: rise 0.32s var(--ease) backwards; }
+.row-card, .photo, .saved-list li, .notice, .stock-card, .product-card { animation: rise 0.32s var(--ease) backwards; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
