@@ -173,8 +173,8 @@ describe('saving', () => {
     expect(detailsToFill(row, listed)).toEqual(['brand', 'ingredients']);
     expect(toCountRowInput(row).details).toEqual({ ...read, brand: 'Rich Glow' });
 
-    // Claude may have the wrong product when it reports Low, so nothing is promised then.
-    expect(detailsToFill({ ...row, confidence: 'Low' }, listed)).toEqual([]);
+    // A Low count fills too: the counter confirms the product before saving.
+    expect(detailsToFill({ ...row, confidence: 'Low' }, listed)).toEqual(['brand', 'ingredients']);
     expect(detailsToFill(row, null)).toEqual([]);
 
     // Details the server would refuse are left out, so they cannot block the count itself.

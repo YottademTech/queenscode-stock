@@ -215,7 +215,7 @@ test('the daily photo limit stops further Claude calls', () => {
 });
 
 const fullLabel = {
-  name: 'QBH Rose Water Toner', size: '200ml', barcode: '0603400012345', category: 'Toner', expiry: '2028-10',
+  name: 'QBH Rose Water Toner', size: '200ml', barcode: '0603400012347', category: 'Toner', expiry: '2028-10',
   brand: 'QBH', variant: 'Rose water', description: 'Clear pink toner in a tall bottle with a white flip cap.',
   batchNumber: '1E5', manufactureDate: '2025-10', manufacturer: 'QBH Cosmetics Ltd, Accra', countryOfOrigin: 'Ghana',
   ingredients: 'Aqua, Rosa Damascena Flower Water, Glycerin', directions: 'Apply with a cotton pad after cleansing.',
@@ -225,7 +225,7 @@ test('everything Claude reads off a product photo is returned, with nothing inve
   const backend = loadBackend({
     claudeReplies: [claudeAnswer({
       ...fullLabel,
-      barcode: '0 603400 012345',
+      barcode: '0 603400 012347',
       manufactureDate: 'October 2025',
       otherDetails: [
         { label: 'Claim', value: 'Alcohol free' }, { label: '', value: 'For external use only' },
@@ -249,6 +249,19 @@ test('everything Claude reads off a product photo is returned, with nothing inve
   const [sent] = backend.recorded.claudeRequests;
   assert.equal(sent.body.output_config.effort, 'medium');
   assert.deepEqual(sent.body.output_config.format.schema.required, [...detailsAskedOfClaude, 'note']);
+});
+
+test('a barcode read off a photo is kept only when its check digit is right', () => {
+  const read = (barcode) => {
+    const backend = loadBackend({ claudeReplies: [claudeAnswer({ ...fullLabel, barcode })] });
+    return backend.post({ action: 'readProductLabel', image: PHOTO }).data.barcode;
+  };
+  assert.equal(read('6001104005674'), '6001104005674', 'EAN-13 with the right check digit');
+  assert.equal(read('6 001104 005674'), '6001104005674', 'spaces as printed under the bars are dropped');
+  assert.equal(read('6001104005675'), '', 'one digit misread: the check digit no longer matches');
+  assert.equal(read('96385074'), '96385074', 'EAN-8');
+  assert.equal(read('036000291452'), '036000291452', 'UPC-A');
+  assert.equal(read('12345'), '12345', 'a short shop code has no check digit to test');
 });
 
 test('a count photo with front and back detail photos goes to Claude as one request', () => {
@@ -369,7 +382,7 @@ test('every detail of a new product is stored in the Products tab and comes back
   assert.equal(reply.ok, true);
 
   assert.deepEqual(backend.workbook.get('Products').rowValues(4, 21), [
-    'QBHRWT-200', 'QBH Rose Water Toner', '200ml', '0603400012345', '', '', 'Toner', '2028-10', '',
+    'QBHRWT-200', 'QBH Rose Water Toner', '200ml', '0603400012347', '', '', 'Toner', '2028-10', '',
     'QBH', 'Rose water', 'Clear pink toner in a tall bottle with a white flip cap.', '1E5', '2025-10',
     'QBH Cosmetics Ltd, Accra', 'Ghana', 'Aqua, Rosa Damascena Flower Water, Glycerin', 'Apply with a cotton pad after cleansing.',
     'Claim: Alcohol free\n=SUM(1)', 'QBH\nROSE WATER TONER\n200ml', 'https://qbh.example/p/rose-toner?batch=1E5',
@@ -396,8 +409,8 @@ test('details read from the photos fill a listed product where the Sheet has not
     countRow({ productCode: 'RG-BLK-500', details: read }),
     // A second row for the same product does not overwrite what the first one filled.
     countRow({ productCode: 'RG-BLK-500', details: { ...noDetails, brand: 'Other brand', variant: 'Black' }, loosePieces: 2 }),
-    // Claude was not sure which product this was, so its reading is not written into the record.
-    countRow({ productCode: 'RG-YEL', confidence: 'Low', details: { ...noDetails, brand: 'Guessed brand' } }),
+    // A Low count still fills: the counter confirmed the product, and Low is usually about the count.
+    countRow({ productCode: 'RG-YEL', confidence: 'Low', details: { ...noDetails, brand: 'Rich Glow', barcode: '6001104005674' } }),
   ]));
   assert.equal(reply.ok, true);
 
@@ -406,7 +419,8 @@ test('details read from the photos fill a listed product where the Sheet has not
     'RG-BLK-500', 'Rich Glow Advanced Whitening Lotion (Black)', '500ml', '6034000999999', '', '', 'Body lotion', '', '',
     'Rich Glow', 'Black', '', '', '', '', '', "'=Aqua, Glycerin", '', '', 'RICH GLOW\nADVANCED WHITENING', '',
   ]);
-  assert.deepEqual(products.rowValues(3, 21).slice(6), new Array(15).fill(''), 'a Low-confidence row fills nothing');
+  assert.deepEqual(products.rowValues(3, 21).slice(3, 4), ['6001104005674'], 'a Low-confidence row fills its barcode too');
+  assert.equal(products.rowValues(3, 21)[9], 'Rich Glow');
   assert.equal(backend.workbook.get('Claude_Counts').rowValues(5, 3)[2], 'RG-YEL', 'the counts themselves are all saved');
 
   const badDetails = backend.post(saveCounts([countRow({ details: { ...noDetails, expiry: 'next year' } })], { requestId: 'request-0005' }));

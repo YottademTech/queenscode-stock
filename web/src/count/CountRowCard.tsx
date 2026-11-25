@@ -64,7 +64,8 @@ export function CountRowCard(props: CountRowCardProps) {
 
       {filling.length > 0 && (
         <p className="hint">
-          Read from the photos and added to this product, where the Sheet has nothing yet: {filling.map((key) => DETAIL_LABELS[key].toLowerCase()).join(', ')}.
+          Read from the photos and added to this product, where the Sheet has nothing yet:{' '}
+          {filling.map((key) => (key === 'barcode' ? `barcode ${row.newProduct.barcode.trim()}` : DETAIL_LABELS[key].toLowerCase())).join(', ')}.
         </p>
       )}
 

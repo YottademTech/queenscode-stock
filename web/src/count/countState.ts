@@ -243,10 +243,10 @@ export function photoCount(photo: Photo): number {
 /**
  * The details of a listed product that saving this row will fill in: those read from the photos
  * that the Sheet does not have yet. The server applies the same rule, and it is the one that
- * decides. A Low-confidence row fills nothing, because Claude may have the wrong product.
+ * decides. A Low-confidence row fills too: the counter confirms the product before saving.
  */
 export function detailsToFill(row: CountRow, product: Product | null): DetailKey[] {
-  if (!product || row.confidence === 'Low' || readDetails(row) === null) return [];
+  if (!product || readDetails(row) === null) return [];
   return DETAIL_KEYS.filter((key) => key !== 'name' && product[key] === '' && row.newProduct[key].trim() !== '');
 }
 

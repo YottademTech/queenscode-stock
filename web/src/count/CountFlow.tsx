@@ -257,7 +257,7 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
           <li>Bags and sacks: step back so every one in the pile shows. The full ones are counted; you enter the pieces in each.</li>
           <li>Open bags and sacks are not full ones. Count what is left inside as loose pieces.</li>
           <li>Keep variants apart. Rich Glow black and Rich Glow yellow are different products.</li>
-          {setLimit > 1 && <li>With front and back photos on: take the stock first, then close-ups of one item, label filling the frame. Only the first photo is counted.</li>}
+          {setLimit > 1 && <li>With front and back photos on: take the stock first, then close-ups of one item, label filling the frame, and the barcode close enough to read its digits. Only the first photo is counted.</li>}
         </ul>
       </details>
 

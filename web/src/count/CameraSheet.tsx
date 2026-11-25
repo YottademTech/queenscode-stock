@@ -20,6 +20,18 @@ type CameraSheetProps = {
   onClose: () => void;
 };
 
+/**
+ * Asks the camera to keep refocusing as it moves, where the phone allows it. Close-ups of a back
+ * label are otherwise often left out of focus, and a barcode's small digits are then unreadable.
+ */
+function keepRefocusing(stream: MediaStream) {
+  const [track] = stream.getVideoTracks();
+  const modes = (track?.getCapabilities?.() as { focusMode?: string[] } | undefined)?.focusMode ?? [];
+  if (!track || !modes.includes('continuous')) return;
+  // Not every phone takes it; the camera still works without.
+  track.applyConstraints({ advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet] }).catch(() => {});
+}
+
 /** Whether this browser lets a page open the camera. It needs https (or localhost). */
 export const canUseCamera = typeof navigator !== 'undefined' && window.isSecureContext && !!navigator.mediaDevices?.getUserMedia;
 
@@ -51,6 +63,7 @@ export function CameraSheet({ location, progress, sets, onShot, onClose }: Camer
         }
         video.srcObject = opened;
         await video.play();
+        keepRefocusing(opened);
         setCamera({ kind: 'live' });
         shutterRef.current?.focus();
       })
@@ -96,7 +109,7 @@ export function CameraSheet({ location, progress, sets, onShot, onClose }: Camer
       ? 'Photo 1: the stock to count.'
       : setIsFull
         ? 'This set is full. Tap Next for the next product.'
-        : `Now the front and back of the product (${set.taken} of ${set.limit} taken). Tap Next when done.`;
+        : `Now the front, back and barcode up close (${set.taken} of ${set.limit} taken). Tap Next when done.`;
 
   return (
     <div className="camera" role="dialog" aria-modal="true" aria-label="Camera">

@@ -255,7 +255,10 @@ const DETAIL_GUIDE = [
   '- category: a short shop category such as "Body lotion", "Hair oil", "Facial cleanser" or "Soap".',
   '- description: one or two sentences on what the product is and what the pack looks like (container type,',
   '  colours, cap or pump), so staff can recognise it on a shelf.',
-  '- barcode: digits only, and only when every digit printed under the barcode is clearly legible.',
+  '- barcode: the number printed under the bars, digits only (usually 13 digits, sometimes 8 or 12). Look for',
+  '  a barcode in every photo, including on the side or base of the pack. Read each digit carefully; when one',
+  '  digit cannot be made out, leave the barcode empty and say so in note. The number is checked by its',
+  '  check digit, so a misread is caught.',
   '- batchNumber: the batch or lot number as printed.',
   '- manufactureDate, expiry: as YYYY-MM-DD, or YYYY-MM when only month and year are shown. Dates on these',
   '  labels are written day-month-year unless the label says otherwise.',
@@ -333,7 +336,9 @@ const LABEL_INSTRUCTIONS = [
 const DETAIL_PHOTOS_GUIDE = [
   'Detail photos were added',
   'Photo 1 is the count photo. The photos after it are close-ups of stock that is in photo 1, taken so its',
-  'labels can be read: usually the front of the product, then the back.',
+  'labels can be read: usually the front of the product, then the back. They are taken for the details the',
+  'count photo is too far away to show: the barcode, batch number, expiry and manufacture dates, ingredients',
+  'and the maker. Look at each detail photo closely for these, the barcode above all.',
   '- Count from photo 1 only. Never add units seen in a detail photo, and never return an item for a product',
   '  that appears only in a detail photo.',
   '- Return an item for every product in photo 1, exactly as you would without the detail photos. A product',
@@ -473,13 +478,26 @@ function cleanDetail(field, raw) {
   if (field.kind === 'lines') return clipLines(raw, field.max);
   if (field.kind === 'digits') {
     const digits = String(raw || '').replace(/\D/g, '');
-    return digits.length <= field.max ? digits : '';
+    if (digits.length > field.max) return '';
+    // A misread barcode would look real in the Sheet, so a standard one must pass its check digit.
+    return field.key === 'barcode' && !barcodeChecks(digits) ? '' : digits;
   }
   if (field.kind === 'date') {
     const text = String(raw || '').trim();
     return isDayOrMonth(text) ? text : '';
   }
   return clip(raw, field.max);
+}
+
+/**
+ * True unless the digits are an EAN-8, UPC-A, EAN-13 or GTIN-14 whose last digit does not match
+ * the others. Other lengths (shop or local codes) have no check digit to test.
+ */
+function barcodeChecks(digits) {
+  if ([8, 12, 13, 14].indexOf(digits.length) === -1) return true;
+  const body = digits.slice(0, -1).split('').reverse();
+  const sum = body.reduce((total, digit, index) => total + Number(digit) * (index % 2 === 0 ? 3 : 1), 0);
+  return (10 - (sum % 10)) % 10 === Number(digits.charAt(digits.length - 1));
 }
 
 /** Turns Claude's label and value pairs into "Label: value" lines, the form kept in one Sheet cell. */
@@ -867,11 +885,11 @@ function planCountWrite(products, rows) {
 
 /**
  * Details read from the photos complete a listed product's record. Only empty cells are filled, so
- * nothing a person entered is replaced, and the name is never touched. A Low-confidence row is
- * skipped: Low is also what Claude reports when it was not sure which product it was looking at.
+ * nothing a person entered is replaced, and the name is never touched. A Low-confidence row fills
+ * too: Low is usually about the count, and the counter has confirmed the product before saving.
  */
 function fillEmptyDetails(product, row, detailFills) {
-  if (!row.details || row.confidence === 'Low') return;
+  if (!row.details) return;
   DETAIL_FIELDS.forEach((field) => {
     const value = row.details[field.key];
     if (field.key === 'name' || product[field.key] !== '' || value === '') return;
