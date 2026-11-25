@@ -3,7 +3,6 @@ import { api, isConfigured } from './api/client';
 import type { Bootstrap } from './api/contract';
 import { CountFlow } from './count/CountFlow';
 import { HandCountFlow } from './handcount/HandCountFlow';
-import { formatDay } from './lib/day';
 import { outbox } from './lib/saves';
 import { ProductsFlow } from './products/ProductsFlow';
 import { SignIn, rememberedSignIn, signOut } from './SignIn';
@@ -119,13 +118,6 @@ export function App() {
       </dialog>
 
       <div className="page">
-        {load.kind === 'ready' && load.bootstrap.countDate !== load.bootstrap.today && (
-          <p className="notice info" role="status">
-            Counts are filed under {formatDay(load.bootstrap.countDate)}, not today. To start a new stocktake, change the count date
-            on the Sheet's Settings tab.
-          </p>
-        )}
-
         {waitingSaves.length > 0 && (
           <section className="notice info" aria-label="Saves waiting to be sent">
             <p>

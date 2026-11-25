@@ -141,7 +141,7 @@ the same.
 - **Sheet limits.** The Stock formulas cover 200 products and 500 photo-count rows in total.
   The app refuses a save that would not fit. Clear old Claude_Counts rows between stocktakes.
 - **Stocktake date.** Counts are filed under Settings!B3. Change it in the Sheet to start a new
-  stocktake; the app warns when it is not today.
+  stocktake. The app does not show the date, so check it in the Sheet before a new stocktake.
 - **Check, then save.** Each photo is counted in the background while you take the next one. Every
   row Claude returns waits on the Photo screen until you check it and tap Save, so nothing reaches
   the Sheet unseen. Low-confidence rows are flagged CHECK on the Stock screen once saved.
