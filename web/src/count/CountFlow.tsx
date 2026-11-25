@@ -21,7 +21,9 @@ const AUTO_RETRY_MS = 15_000;
 /** Failures that pass on their own: no signal, a busy server, Claude overloaded. */
 const PASSING_FAILURES = new Set(['network', 'busy', 'claude_unavailable', 'service_unavailable']);
 
-const PHOTO_SETS_KEY = 'stock.photosets';
+// A new key: photo sets became the default, and a choice of "off" saved before that should not keep
+// phones counting each photo of a product as a product of its own.
+const PHOTO_SETS_KEY = 'stock.photosets.v2';
 
 /** An on/off choice the counter made earlier on this phone. */
 function rememberedChoice(key: string, fallback: boolean): boolean {
@@ -48,7 +50,8 @@ type CountFlowProps = { bootstrap: Bootstrap; counter: string; onSaved: () => vo
 export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
   const [state, dispatch] = useReducer(countReducer, emptyCount);
   const [location, setLocation] = useState(bootstrap.locations[0] ?? '');
-  const [photoSets, setPhotoSets] = useState(() => rememberedChoice(PHOTO_SETS_KEY, false));
+  // On unless the counter chose "One by one": photos taken together are one product's stock, front and back.
+  const [photoSets, setPhotoSets] = useState(() => rememberedChoice(PHOTO_SETS_KEY, true));
   const [cameraOpen, setCameraOpen] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   // The row being filled in by hand, in the panel on the right. It joins the list only when added.
