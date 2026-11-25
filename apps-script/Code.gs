@@ -97,6 +97,8 @@ const DEFAULT_CURRENCIES = [
   ['AED', 'UAE dirham', 'AED', 2],
 ];
 const MAX_CURRENCIES = 50;
+/** The shop's own currency: a price with no currency given is in Ghana cedis. */
+const DEFAULT_CURRENCY = 'GHS';
 
 const CONFIDENCE_LEVELS = ['High', 'Medium', 'Low'];
 const IMAGE_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
@@ -780,7 +782,8 @@ function writePrice(sheet, row, price) {
 function parsePrice(source, currencies) {
   if (!isRecord(source) || source.price === undefined) return undefined;
   if (source.price === null) return { price: null, currency: '' };
-  const currency = currencies.filter((candidate) => candidate.code === source.currency)[0];
+  const code = source.currency === undefined || source.currency === null || source.currency === '' ? DEFAULT_CURRENCY : source.currency;
+  const currency = currencies.filter((candidate) => candidate.code === code)[0];
   if (!currency) throw new AppError('invalid_request', 'Choose the currency of the price.');
   const amount = source.price;
   if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0 || amount > MAX_PRICE) {
@@ -1128,7 +1131,8 @@ function readProducts(ss) {
       // The first photo is the one the product list shows, also for an app from before several photos.
       product.imageUrl = product.imageUrls[0] || '';
       product.price = numberOrNull(cells[PRICE_COLUMN - 1]);
-      product.currency = product.price === null ? '' : String(cells[CURRENCY_COLUMN - 1]).trim().toUpperCase();
+      // A price typed into the Sheet with no currency beside it is in cedis.
+      product.currency = product.price === null ? '' : String(cells[CURRENCY_COLUMN - 1]).trim().toUpperCase() || DEFAULT_CURRENCY;
       DETAIL_FIELDS.forEach((field) => {
         const cell = cells[field.column - 1];
         // A date typed into the Sheet by hand arrives as a Date; the app works with its text form.

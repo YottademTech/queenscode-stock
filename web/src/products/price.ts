@@ -3,7 +3,7 @@ import type { Currency, PriceInput } from '../api/contract';
 /** What a person types for a price, before it is checked: the amount as text and a currency code. */
 export type PriceDraft = { amount: string; currency: string };
 
-/** GHS when the Sheet lists it, else the first currency listed. */
+/** Ghana cedis, the shop's own currency, when the Sheet lists it; else the first currency listed. */
 export function defaultCurrency(currencies: readonly Currency[]): string {
   return currencies.find((currency) => currency.code === 'GHS')?.code ?? currencies[0]?.code ?? '';
 }

@@ -616,6 +616,17 @@ test('a product keeps its selling price as a number and a currency code, ready f
   assert.deepEqual(priceCells(backend, 4), [1500, 'XOF']);
 });
 
+test('a price with no currency is in Ghana cedis, whether sent from the app or typed into the Sheet', () => {
+  const backend = loadBackend();
+  backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion', price: 30 }));
+  assert.deepEqual(priceCells(backend), [30, 'GHS']);
+
+  backend.workbook.get('Products').fill(2, [['RG-BLK-500', 'Rich Glow Advanced Whitening Lotion (Black)', '500ml']]);
+  backend.workbook.get('Products').write(2, 22, 45);
+  const product = backend.post({ action: 'bootstrap' }).data.products.find((p) => p.code === 'RG-BLK-500');
+  assert.deepEqual([product.price, product.currency], [45, 'GHS']);
+});
+
 test('a price is refused in an unknown currency, below zero, or with more decimals than its currency has', () => {
   const backend = loadBackend();
   const tryPrice = (price, currency, n) => backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion', price, currency }, { requestId: `request-02${n}0` }));
