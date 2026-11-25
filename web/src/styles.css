@@ -635,7 +635,14 @@ details[open] > summary::after { transform: translateY(0.25rem) rotate(-135deg);
 .camera-mode label:has(input:focus-visible) { outline: 2px solid #fff; outline-offset: 2px; }
 /* The shutter stays in the middle; "Next" sits to its right when photo sets are on. */
 .camera-controls { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 0.75rem; width: 100%; }
-.camera-shutter { grid-column: 2; }
+.camera-shutter-ring { grid-column: 2; display: inline-flex; padding: 0.3rem; border-radius: 50%; background: conic-gradient(var(--gold-bright) calc(var(--steady, 0) * 360deg), rgb(255 255 255 / 0.18) 0); transition: background 0.15s linear; }
+/* Beside the button on the left: Auto on or off before the stock photo, Retake after it. */
+.camera-side { grid-column: 1; justify-self: end; font: inherit; font-weight: 600; font-size: 0.9rem; white-space: nowrap; display: inline-flex; align-items: center; gap: 0.35rem; min-height: 2.75rem; padding: 0 0.9rem; color: #fff; background: rgb(255 255 255 / 0.16); border: 1px solid rgb(255 255 255 / 0.4); border-radius: 10rem; cursor: pointer; }
+.camera-auto[aria-pressed='true'] { color: var(--black); background: var(--gold-shine); border-color: transparent; }
+/* The count of the stock photo: large enough to read at arm's length over a shelf. */
+.camera-count { margin: 0; display: flex; flex-direction: column; align-items: center; text-align: center; font-size: 0.95rem; max-width: 100%; }
+.camera-count strong { font-size: clamp(1.9rem, 9vw, 2.6rem); line-height: 1.1; color: var(--gold-bright); font-variant-numeric: tabular-nums; }
+.camera-count small { font-size: 0.85rem; color: #e9e2cd; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .camera-next { grid-column: 3; justify-self: start; font: inherit; font-weight: 600; white-space: nowrap; display: inline-flex; align-items: center; gap: 0.35rem; min-height: 2.75rem; padding: 0 0.9rem; color: var(--black); background: var(--gold-shine); border: 0; border-radius: 10rem; cursor: pointer; }
 .camera-next:disabled { opacity: 0.4; cursor: not-allowed; }
 .camera-close { font: inherit; font-weight: 600; display: inline-flex; align-items: center; gap: 0.35rem; min-height: 2.75rem; padding: 0 1rem; color: #fff; background: rgb(255 255 255 / 0.16); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); border: 1px solid rgb(255 255 255 / 0.4); border-radius: 10rem; cursor: pointer; }

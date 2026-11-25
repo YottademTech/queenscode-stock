@@ -12,6 +12,16 @@ export type PhotoStatus =
   /** `retryable` failures (no signal, server busy) are tried again without the counter doing anything. */
   | { kind: 'failed'; message: string; retryable: boolean };
 
+/**
+ * The count of a set's first photo on its own, asked for the moment it is taken in the camera, so
+ * the counter sees a number before taking the detail photos. `wanted` has not been sent yet.
+ */
+export type FirstLook =
+  | { kind: 'wanted' }
+  | { kind: 'counting' }
+  | { kind: 'done'; note: string; rows: readonly CountRow[] }
+  | { kind: 'failed' };
+
 export type Photo = {
   id: string;
   previewUrl: string;
@@ -23,6 +33,7 @@ export type Photo = {
   /** How many times Claude has been asked to read it and failed. */
   failures: number;
   status: PhotoStatus;
+  firstLook?: FirstLook;
 };
 
 export type CountRow = {
@@ -54,7 +65,10 @@ export type RowDetails = Pick<CountRow, 'productCode' | 'newProduct' | 'confiden
 export type CountAction =
   | { type: 'photoAdded'; photo: Photo }
   /** A photo taken while photo sets are on: it starts a set, or joins the open one as a detail photo. */
-  | { type: 'setPhotoAdded'; photo: Photo; limit: number }
+  | { type: 'setPhotoAdded'; photo: Photo; limit: number; firstLook?: boolean }
+  | { type: 'firstLookStarted'; photoId: string }
+  | { type: 'firstLookSucceeded'; photoId: string; note: string; rows: readonly CountRow[] }
+  | { type: 'firstLookFailed'; photoId: string }
   | { type: 'detailPhotoRemoved'; photoId: string; index: number }
   | { type: 'openSetClosed' }
   | { type: 'readingStarted'; photoId: string }
@@ -82,7 +96,10 @@ export function countReducer(state: CountState, action: CountAction): CountState
 
     case 'setPhotoAdded': {
       const open = state.photos.find((photo) => photo.status.kind === 'collecting');
-      if (!open) return { ...state, photos: [...state.photos, { ...action.photo, details: [], status: { kind: 'collecting' } }] };
+      if (!open) {
+        const first: Photo = { ...action.photo, details: [], status: { kind: 'collecting' }, firstLook: action.firstLook ? { kind: 'wanted' } : undefined };
+        return { ...state, photos: [...state.photos, first] };
+      }
       // The screen stops the counter before a set is full; a shot that slips past is not counted as a new set.
       if (1 + open.details.length >= action.limit) return state;
       const detail = { image: action.photo.image, previewUrl: action.photo.previewUrl };
@@ -92,19 +109,41 @@ export function countReducer(state: CountState, action: CountAction): CountState
     case 'detailPhotoRemoved':
       return withPhoto(state, action.photoId, (photo) => ({ ...photo, details: photo.details.filter((_, index) => index !== action.index) }));
 
-    case 'openSetClosed':
-      return { ...state, photos: state.photos.map((photo) => (photo.status.kind === 'collecting' ? { ...photo, status: { kind: 'waiting' } } : photo)) };
+    case 'openSetClosed': {
+      const open = state.photos.find((photo) => photo.status.kind === 'collecting');
+      if (!open) return state;
+      // With no detail photos, the first look already is the whole answer: no second request.
+      if (open.details.length === 0 && open.firstLook?.kind === 'done') return finishWith(state, open.id, open.firstLook.note, open.firstLook.rows);
+      return withPhoto(state, open.id, (photo) => ({ ...photo, status: { kind: 'waiting' } }));
+    }
+
+    case 'firstLookStarted':
+      return withPhoto(state, action.photoId, (photo) => ({ ...photo, firstLook: { kind: 'counting' } }));
+
+    case 'firstLookSucceeded': {
+      const photo = state.photos.find((candidate) => candidate.id === action.photoId);
+      // The photo may have been removed, or the whole set counted, while the first look was on its way.
+      if (!photo || photo.status.kind === 'done') return state;
+      // The set was closed without detail photos and was waiting for exactly this.
+      if (awaitsFirstLook(photo)) return finishWith(state, photo.id, action.note, action.rows);
+      return withPhoto(state, photo.id, (current) => ({ ...current, firstLook: { kind: 'done', note: action.note, rows: action.rows } }));
+    }
+
+    case 'firstLookFailed':
+      // A set waiting on it is then counted the usual way.
+      return withPhoto(state, action.photoId, (photo) => ({ ...photo, firstLook: { kind: 'failed' } }));
 
     case 'readingStarted':
       return withPhoto(state, action.photoId, (photo) => ({ ...photo, status: { kind: 'reading' } }));
 
-    case 'readingSucceeded':
+    case 'readingSucceeded': {
       // The counter may have removed the photo while Claude was still reading it.
-      if (!state.photos.some((photo) => photo.id === action.photoId)) return state;
-      return {
-        ...withPhoto(state, action.photoId, (photo) => ({ ...photo, status: { kind: 'done', note: action.note } })),
-        rows: [...state.rows, ...action.rows],
-      };
+      const photo = state.photos.find((candidate) => candidate.id === action.photoId);
+      if (!photo) return state;
+      // The stock photo has now been counted twice: once alone, once with its detail photos.
+      const rows = photo.firstLook?.kind === 'done' ? flagIfCountsDiffer(photo.firstLook.rows, action.rows) : action.rows;
+      return finishWith(state, photo.id, action.note, rows);
+    }
 
     case 'readingFailed':
       return withPhoto(state, action.photoId, (photo) => ({
@@ -155,6 +194,38 @@ export function countReducer(state: CountState, action: CountAction): CountState
       return unhandled;
     }
   }
+}
+
+/** True for a set closed without detail photos whose first look is still on its way: that answer is the count. */
+export function awaitsFirstLook(photo: Photo): boolean {
+  return photo.status.kind === 'waiting' && photo.details.length === 0 && photo.firstLook?.kind === 'counting';
+}
+
+function finishWith(state: CountState, photoId: string, note: string, rows: readonly CountRow[]): CountState {
+  return {
+    ...withPhoto(state, photoId, (photo) => ({ ...photo, status: { kind: 'done', note } })),
+    rows: [...state.rows, ...rows],
+  };
+}
+
+/** The server's limit on a row's note. */
+const NOTE_MAX = 300;
+
+const tally = (rows: readonly CountRow[]) => ({
+  full: rows.reduce((sum, row) => sum + row.fullCartons, 0),
+  loose: rows.reduce((sum, row) => sum + row.loosePieces, 0),
+});
+const describeTally = ({ full, loose }: { full: number; loose: number }) => (full > 0 ? `${full} full and ${loose} loose` : `${loose}`);
+
+/**
+ * Two counts of the same photo that disagree mean the photo is hard to count. The rows are then
+ * marked Low, with both numbers in the note, so the counter checks them by hand.
+ */
+export function flagIfCountsDiffer(first: readonly CountRow[], second: readonly CountRow[]): readonly CountRow[] {
+  const [before, after] = [tally(first), tally(second)];
+  if (before.full === after.full && before.loose === after.loose) return second;
+  const warning = `Counted twice with different results: ${describeTally(before)}, then ${describeTally(after)}. Count by hand.`;
+  return second.map((row) => ({ ...row, confidence: 'Low' as const, note: `${warning} ${row.note}`.trim().slice(0, NOTE_MAX) }));
 }
 
 function withPhoto(state: CountState, photoId: string, change: (photo: Photo) => Photo): CountState {
@@ -233,6 +304,25 @@ export function savedCount(row: CountRow, products: readonly Product[], waitingF
     confidence: row.confidence,
     waitingForSignal,
   };
+}
+
+/**
+ * What the camera shows once a photo is counted: the pieces in all, what they are, and the full
+ * bags, sacks or cartons whose size nobody has entered yet, which cannot be turned into pieces.
+ */
+export function countSummary(rows: readonly CountRow[], products: readonly Product[]): { pieces: number; unsizedPacks: number; label: string } {
+  let pieces = 0;
+  let unsizedPacks = 0;
+  for (const row of rows) {
+    const product = findProduct(products, row.productCode);
+    pieces += totalPieces(row, product);
+    if (!packSizeFor(row, product)) unsizedPacks += row.fullCartons;
+  }
+  const [only] = rows;
+  const label = rows.length === 1 && only
+    ? findProduct(products, only.productCode)?.name ?? (only.newProduct.name.trim() || 'New product')
+    : rows.length > 1 ? `${rows.length} products` : '';
+  return { pieces, unsizedPacks, label };
 }
 
 /** How many photos this entry sends to Claude: the count photo plus its detail photos. */

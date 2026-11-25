@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { CountAnalysis, Product } from '../api/contract';
 import { emptyDetails } from '../products/details';
 import {
-  countReducer, handRow, detailsToFill, emptyCount, groupByLocation, photoCount, rowProblems, rowsFromAnalysis, rowsPerProduct,
+  awaitsFirstLook, countReducer, countSummary, flagIfCountsDiffer, handRow, detailsToFill, emptyCount, groupByLocation, photoCount, rowProblems, rowsFromAnalysis, rowsPerProduct,
   savedCount, toCountRowInput, totalPieces, type CountRow, type CountState, type Photo,
 } from './countState';
 
@@ -188,5 +188,76 @@ describe('saving', () => {
     state = countReducer(state, { type: 'readingSucceeded', photoId: 'empty', note: 'Nothing to count here.', rows: [] });
     state = countReducer(state, { type: 'rowsSaved', rowIds: [], saved: [] });
     expect(state.photos[0]?.status).toEqual({ kind: 'done', note: 'Nothing to count here.' });
+  });
+});
+
+describe('the first look: the stock photo counted as soon as it is taken', () => {
+  const taken = (firstLook = true): CountState =>
+    countReducer(emptyCount, { type: 'setPhotoAdded', photo: photo('p1', 'Shop shelf'), limit: 4, firstLook });
+  const counted = (state: CountState, ids = ['a', 'b']) =>
+    countReducer(countReducer(state, { type: 'firstLookStarted', photoId: 'p1' }), { type: 'firstLookSucceeded', photoId: 'p1', note: 'Two products.', rows: rowsOf('p1', ids, 'Shop shelf') });
+
+  it('is asked for only when the photo came from the camera', () => {
+    expect(taken().photos[0]?.firstLook).toEqual({ kind: 'wanted' });
+    expect(taken(false).photos[0]?.firstLook).toBeUndefined();
+  });
+
+  it('is the whole answer when no detail photos follow: the set is finished without a second request', () => {
+    const state = countReducer(counted(taken()), { type: 'openSetClosed' });
+    expect(state.photos[0]?.status).toEqual({ kind: 'done', note: 'Two products.' });
+    expect(state.rows.map((row) => row.id)).toEqual(['a', 'b']);
+  });
+
+  it('is waited for when the set is closed before it arrives', () => {
+    let state = countReducer(taken(), { type: 'firstLookStarted', photoId: 'p1' });
+    state = countReducer(state, { type: 'openSetClosed' });
+    expect(awaitsFirstLook(state.photos[0]!)).toBe(true);
+    expect(state.rows).toEqual([]);
+
+    const arrived = countReducer(state, { type: 'firstLookSucceeded', photoId: 'p1', note: '', rows: rowsOf('p1', ['a', 'b'], 'Shop shelf') });
+    expect(arrived.photos[0]?.status.kind).toBe('done');
+    expect(arrived.rows).toHaveLength(2);
+
+    // If it fails instead, the set is counted the usual way.
+    const failed = countReducer(state, { type: 'firstLookFailed', photoId: 'p1' });
+    expect(awaitsFirstLook(failed.photos[0]!)).toBe(false);
+    expect(failed.photos[0]?.status.kind).toBe('waiting');
+  });
+
+  it('is kept only for comparison when detail photos follow, and the full set is counted', () => {
+    let state = countReducer(counted(taken()), { type: 'setPhotoAdded', photo: photo('front'), limit: 4 });
+    state = countReducer(state, { type: 'openSetClosed' });
+    expect(state.photos[0]?.status.kind).toBe('waiting');
+    expect(state.rows).toEqual([]);
+
+    state = countReducer(state, { type: 'readingStarted', photoId: 'p1' });
+    const same = countReducer(state, { type: 'readingSucceeded', photoId: 'p1', note: '', rows: rowsOf('p1', ['c', 'd'], 'Shop shelf') });
+    expect(same.rows.map((row) => [row.id, row.confidence])).toEqual([['c', 'Low'], ['d', 'Medium']]);
+    expect(same.rows[1]?.note).toBe('');
+  });
+
+  it('marks the rows for a hand count when the two counts of the photo disagree', () => {
+    const first = rowsOf('p1', ['a', 'b']);
+    const second = rowsOf('p1', ['c', 'd']).map((row, index) => (index === 1 ? { ...row, loosePieces: 7 } : row));
+    const flagged = flagIfCountsDiffer(first, second);
+    expect(flagged.map((row) => row.confidence)).toEqual(['Low', 'Low']);
+    expect(flagged[1]?.note).toBe('Counted twice with different results: 2 full and 8 loose, then 2 full and 10 loose. Count by hand.');
+    expect(flagged[0]?.note.length).toBeLessThanOrEqual(300);
+    expect(flagIfCountsDiffer(first, rowsOf('p1', ['c', 'd']))[1]?.confidence).toBe('Medium');
+  });
+
+  it('is ignored when it arrives for a photo that was removed', () => {
+    const removed = countReducer(countReducer(taken(), { type: 'firstLookStarted', photoId: 'p1' }), { type: 'photoRemoved', photoId: 'p1' });
+    expect(countReducer(removed, { type: 'firstLookSucceeded', photoId: 'p1', note: '', rows: rowsOf('p1', ['a', 'b']) })).toBe(removed);
+  });
+
+  it('sums up a count for the camera: the pieces, and the product or how many products', () => {
+    const rows = rowsOf('p1', ['a', 'b']);
+    expect(countSummary(rows, [product()])).toEqual({ pieces: 2 * 12 + 3 + 5, unsizedPacks: 0, label: '2 products' });
+    expect(countSummary(rows.slice(0, 1), [product()])).toEqual({ pieces: 27, unsizedPacks: 0, label: 'Rich Glow Yellow Tone Lotion' });
+    expect(countSummary(rows.slice(1), [])).toEqual({ pieces: 5, unsizedPacks: 0, label: 'QBH Carrot Oil' });
+    // Two full sacks of unknown size cannot be turned into pieces, so they are named as sacks.
+    expect(countSummary(rows.slice(0, 1), [product({ packSize: null })])).toEqual({ pieces: 3, unsizedPacks: 2, label: 'Rich Glow Yellow Tone Lotion' });
+    expect(countSummary([], [])).toEqual({ pieces: 0, unsizedPacks: 0, label: '' });
   });
 });

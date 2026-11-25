@@ -55,6 +55,23 @@ How it is kept, ready to move into a database:
 The product code (column A) stays the key every tab refers to. The server checks a price against
 its currency: no negative amounts, and no more decimals than the currency has.
 
+## Auto-snap counting
+
+In the camera's **Stock, front, back** mode, with **Auto on**, the stock photo takes itself: hold
+the phone steady over one product's stock, the ring around the button fills, and the photo is
+taken with a beep. That photo is counted straight away, and the count shows in the camera with a
+second sound, while the front, back and barcode are taken by hand. **Retake** throws the stock
+photo away; **Auto off** leaves the button to the counter. The beep is per photo, not per item.
+
+- The stock photo is counted on its own first, then again with its detail photos when **Next** is
+  tapped. If the two counts disagree, the rows are marked Low with both numbers in the note. With
+  no detail photos, the first count is the answer and no second request is made.
+- After a photo, the camera waits for the picture to change before it takes another, so the same
+  stock is not taken twice. Only the stock photo is automatic.
+- The steadiness limits in `web/src/count/autoSnap.ts` were set on simulated footage, not on
+  phones. Tune them there if it fires too early or too late.
+- An iPhone with its ring switch on silent makes no sound; the screen shows the same thing.
+
 ## Deleting a product
 
 On the Products screen, open a product and tap **Delete product**, then confirm. The product is

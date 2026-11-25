@@ -1,16 +1,18 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { api } from '../api/client';
 import type { Bootstrap } from '../api/contract';
+import { rememberChoice, rememberedChoice } from '../lib/choices';
 import { createRequestIds, newId } from '../lib/id';
 import { COUNT_PHOTO_EDGE, preparePhoto, type PreparedPhoto } from '../lib/image';
 import { submitSave } from '../lib/saves';
+import { unlockSounds } from '../lib/sounds';
 import { NoticeBox, PhotoButtons, SelectField, SwitchField, type Notice } from '../shared/fields';
 import { Icon } from '../shared/Icon';
-import { CameraSheet, canUseCamera } from './CameraSheet';
+import { CameraSheet, canUseCamera, type CameraCount } from './CameraSheet';
 import { CountRowCard } from './CountRowCard';
 import { ANY_PACK, containerAt, countingHint } from './containers';
 import {
-  countReducer, handRow, rowErrors, emptyCount, groupByLocation, photoCount, rowProblems, rowsFromAnalysis, rowsPerProduct, savedCount,
+  awaitsFirstLook, countReducer, countSummary, handRow, rowErrors, emptyCount, groupByLocation, photoCount, rowProblems, rowsFromAnalysis, rowsPerProduct, savedCount,
   toCountRowInput, type CountRow, type Photo,
 } from './countState';
 
@@ -24,24 +26,6 @@ const PASSING_FAILURES = new Set(['network', 'busy', 'claude_unavailable', 'serv
 // A new key: photo sets became the default, and a choice of "off" saved before that should not keep
 // phones counting each photo of a product as a product of its own.
 const PHOTO_SETS_KEY = 'stock.photosets.v2';
-
-/** An on/off choice the counter made earlier on this phone. */
-function rememberedChoice(key: string, fallback: boolean): boolean {
-  try {
-    const stored = window.localStorage.getItem(key);
-    return stored === null ? fallback : stored === 'on';
-  } catch {
-    return fallback;
-  }
-}
-
-function rememberChoice(key: string, enabled: boolean) {
-  try {
-    window.localStorage.setItem(key, enabled ? 'on' : 'off');
-  } catch {
-    // The choice still holds until the app is closed.
-  }
-}
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
@@ -60,6 +44,7 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
   // Errors in the panel show under their fields once Add has been tapped, then follow the typing.
   const [showHandErrors, setShowHandErrors] = useState(false);
   const startedPhotoIds = useRef(new Set<string>());
+  const startedFirstLooks = useRef(new Set<string>());
   const requestIds = useRef(createRequestIds()).current;
 
   async function saveRows(rows: readonly CountRow[], place: string, requestId: string): Promise<boolean> {
@@ -87,7 +72,8 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
   // never waits for this. The ref stops a photo being sent twice between renders.
   useEffect(() => {
     const readingNow = state.photos.filter((photo) => photo.status.kind === 'reading').length;
-    const next = state.photos.find((photo) => photo.status.kind === 'waiting' && !startedPhotoIds.current.has(photo.id));
+    // A set closed without detail photos, whose first look is still on its way, needs no request of its own.
+    const next = state.photos.find((photo) => photo.status.kind === 'waiting' && !awaitsFirstLook(photo) && !startedPhotoIds.current.has(photo.id));
     if (!next || readingNow >= PHOTOS_READ_AT_ONCE) return;
 
     startedPhotoIds.current.add(next.id);
@@ -101,6 +87,23 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
 
       // Every row waits for the counter to check it and tap Save.
       dispatch({ type: 'readingSucceeded', photoId: next.id, note: result.data.photoNote, rows: rowsFromAnalysis(next, result.data, newId) });
+    });
+  }, [state.photos]);
+
+  // A stock photo taken in the camera is counted on its own straight away, so the number shows in
+  // the camera while the counter takes the front and back. The whole set is still read on "Next".
+  useEffect(() => {
+    const wanted = state.photos.find((photo) => photo.firstLook?.kind === 'wanted' && !startedFirstLooks.current.has(photo.id));
+    if (!wanted) return;
+
+    startedFirstLooks.current.add(wanted.id);
+    dispatch({ type: 'firstLookStarted', photoId: wanted.id });
+    void api.analyzeCount(wanted.location, [wanted.image]).then((result) => {
+      if (!result.ok) {
+        dispatch({ type: 'firstLookFailed', photoId: wanted.id });
+        return;
+      }
+      dispatch({ type: 'firstLookSucceeded', photoId: wanted.id, note: result.data.photoNote, rows: rowsFromAnalysis(wanted, result.data, newId) });
     });
   }, [state.photos]);
 
@@ -150,10 +153,29 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
   const alreadyCounted = (row: CountRow) =>
     bootstrap.counted.find((entry) => entry.code === row.productCode && entry.location === row.location)?.pieces ?? 0;
 
-  const addPhoto = (prepared: PreparedPhoto) => {
+  const addPhoto = (prepared: PreparedPhoto, fromCamera = false) => {
     const photo: Photo = { id: newId(), ...prepared, details: [], location, failures: 0, status: { kind: 'waiting' } };
-    dispatch(usingSets ? { type: 'setPhotoAdded', photo, limit: setLimit } : { type: 'photoAdded', photo });
+    dispatch(usingSets ? { type: 'setPhotoAdded', photo, limit: setLimit, firstLook: fromCamera } : { type: 'photoAdded', photo });
   };
+
+  // "7 pieces", or "2 full sacks + 3 pieces" where the pieces in a full sack are not known yet.
+  const cameraHeadline = (rows: readonly CountRow[]): CameraCount => {
+    const summary = countSummary(rows, bootstrap.products);
+    const unit = containerAt(openSet?.location ?? location) ?? ANY_PACK;
+    const parts = [
+      summary.unsizedPacks > 0 && `${summary.unsizedPacks} full ${summary.unsizedPacks === 1 ? unit.one : unit.many}`,
+      (summary.pieces > 0 || summary.unsizedPacks === 0) && plural(summary.pieces, 'piece', 'pieces'),
+    ].filter(Boolean);
+    return { kind: 'done', headline: parts.join(' + '), label: summary.label, nothing: rows.length === 0 };
+  };
+
+  // What the camera shows for the open set's stock photo: still counting, the count, or nothing yet.
+  const firstLook = openSet?.firstLook;
+  const cameraCount: CameraCount | null = !firstLook
+    ? null
+    : firstLook.kind === 'done'
+      ? cameraHeadline(firstLook.rows)
+      : firstLook.kind === 'failed' ? { kind: 'failed' } : { kind: 'counting' };
 
   const handleFiles = async (files: File[]) => {
     setNotice(null);
@@ -261,7 +283,7 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
         </ul>
       </details>
 
-      <PhotoButtons multiple onFiles={handleFiles} onOpenCamera={canUseCamera ? () => setCameraOpen(true) : undefined} />
+      <PhotoButtons multiple onFiles={handleFiles} onOpenCamera={canUseCamera ? () => { unlockSounds(); setCameraOpen(true); } : undefined} />
       <NoticeBox notice={notice} />
 
       <p className="progress" role="status" aria-live="polite">{progress}</p>
@@ -296,7 +318,7 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
                 {photo.status.kind === 'collecting' && (photo.details.length === 0
                   ? 'This photo is counted. Add the front and back of the product, then count the set.'
                   : `Counted photo plus ${plural(photo.details.length, 'detail photo', 'detail photos')}. Tap a detail photo to remove it.`)}
-                {photo.status.kind === 'waiting' && 'Waiting its turn'}
+                {photo.status.kind === 'waiting' && (awaitsFirstLook(photo) ? 'Processing…' : 'Waiting its turn')}
                 {photo.status.kind === 'reading' && 'Processing…'}
                 {photo.status.kind === 'done' && (photo.status.note || 'Counted')}
                 {photo.status.kind === 'failed' && (
@@ -469,8 +491,12 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
         <CameraSheet
           location={location}
           progress={progress}
-          sets={setLimit > 1 ? { on: photoSets, onChange: handlePhotoSetsChange, taken: openSetSize, limit: setLimit, onNext: closeOpenSet } : undefined}
-          onShot={addPhoto}
+          sets={setLimit > 1 ? {
+            on: photoSets, onChange: handlePhotoSetsChange, taken: openSetSize, limit: setLimit, onNext: closeOpenSet,
+            count: cameraCount,
+            onRetake: () => { if (openSet) dispatch({ type: 'photoRemoved', photoId: openSet.id }); },
+          } : undefined}
+          onShot={(photo) => addPhoto(photo, true)}
           onClose={handleCameraClose}
         />
       )}
