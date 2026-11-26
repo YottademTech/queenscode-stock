@@ -35,10 +35,12 @@ type ProductFormProps = {
   currencies: readonly Currency[];
   /** Called with a message for the list once the product is saved or deleted. */
   onDone: (message: string) => void;
+  /** Called when the save was refused because someone else changed the product: the list is out of date. */
+  onStale: () => void;
   onCancel: () => void;
 };
 
-export function ProductForm({ product, countedPieces, canDelete, photoLimit, currencies, onDone, onCancel }: ProductFormProps) {
+export function ProductForm({ product, countedPieces, canDelete, photoLimit, currencies, onDone, onStale, onCancel }: ProductFormProps) {
   const [values, setValues] = useState<FormValues>({
     ...(product ? pickDetails(product) : emptyDetails()),
     packSize: product?.packSize ?? null,
@@ -157,7 +159,13 @@ export function ProductForm({ product, countedPieces, canDelete, photoLimit, cur
       },
       ...(onePhotoOnly
         ? { image: added[0]?.image ?? null }
-        : { keepImageUrls: [...kept], images: added.map((photo) => photo.image) }),
+        : {
+            removeImageUrls: (product?.imageUrls ?? []).filter((url) => !kept.includes(url)),
+            keepImageUrls: [...kept],
+            images: added.map((photo) => photo.image),
+          }),
+      // Which copy of the product these changes were made to: the one this form was opened with.
+      ...(product?.version !== undefined ? { productVersion: product.version } : {}),
     };
 
     setActivity('saving');
@@ -167,6 +175,8 @@ export function ProductForm({ product, countedPieces, canDelete, photoLimit, cur
 
     if (!result.ok) {
       setNotice({ tone: 'error', text: result.error.message });
+      // The other person's changes are fetched now, so opening the product again shows them.
+      if (result.error.code === 'conflict') onStale();
       return;
     }
     requestIds.reset();

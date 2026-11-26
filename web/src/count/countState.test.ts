@@ -3,11 +3,11 @@ import type { CountAnalysis, Product } from '../api/contract';
 import { emptyDetails } from '../products/details';
 import {
   awaitsFirstLook, countReducer, countSummary, flagIfCountsDiffer, handRow, detailsToFill, emptyCount, groupByLocation, photoCount, rowProblems, rowsFromAnalysis, rowsPerProduct,
-  savedCount, toCountRowInput, totalPieces, type CountRow, type CountState, type Photo,
+  savedCount, toCountRowInput, totalPieces, viewCount, type CountRow, type CountState, type Photo,
 } from './countState';
 
 const photo = (id: string, location = 'Warehouse sacks'): Photo => ({
-  id, previewUrl: `data:${id}`, image: { data: id, mediaType: 'image/jpeg' }, details: [], location, failures: 0, status: { kind: 'waiting' },
+  id, previewUrl: `data:${id}`, image: { data: id, mediaType: 'image/jpeg' }, views: [], details: [], location, failures: 0, status: { kind: 'waiting' },
 });
 
 const product = (overrides: Partial<Product> = {}): Product => ({
@@ -259,5 +259,61 @@ describe('the first look: the stock photo counted as soon as it is taken', () =>
     // Two full sacks of unknown size cannot be turned into pieces, so they are named as sacks.
     expect(countSummary(rows.slice(0, 1), [product({ packSize: null })])).toEqual({ pieces: 3, unsizedPacks: 2, label: 'Rich Glow Yellow Tone Lotion' });
     expect(countSummary([], [])).toEqual({ pieces: 0, unsizedPacks: 0, label: '' });
+  });
+});
+
+describe('counting from a video taken around the stock', () => {
+  const view = (name: string) => ({ image: { data: name, mediaType: 'image/jpeg' as const }, previewUrl: `data:${name}` });
+  const video = (id: string): Photo => ({ ...photo(id), views: [view(`${id}-above`), view(`${id}-side`)] });
+
+  it('starts a set whose stock is several views, and the photos after it are its details', () => {
+    let state = countReducer(emptyCount, { type: 'setPhotoAdded', photo: video('v1'), limit: 4, firstLook: true });
+    state = countReducer(state, { type: 'setPhotoAdded', photo: photo('front'), limit: 4 });
+    state = countReducer(state, { type: 'setPhotoAdded', photo: photo('back'), limit: 4 });
+
+    const [set] = state.photos;
+    expect(state.photos).toHaveLength(1);
+    expect(set).toMatchObject({ id: 'v1', status: { kind: 'collecting' }, firstLook: { kind: 'wanted' } });
+    expect(set && viewCount(set)).toBe(3);
+    // The video counts as one towards the size of the set, however many views it holds.
+    expect(set && photoCount(set)).toBe(3);
+    expect(set?.details.map((detail) => detail.image.data)).toEqual(['front', 'back']);
+  });
+
+  it('still takes at most three detail photos after the video', () => {
+    let state = countReducer(emptyCount, { type: 'setPhotoAdded', photo: video('v1'), limit: 4 });
+    for (const name of ['d1', 'd2', 'd3', 'd4']) state = countReducer(state, { type: 'setPhotoAdded', photo: photo(name), limit: 4 });
+    expect(state.photos[0]?.details).toHaveLength(3);
+  });
+
+  it('is finished by its first look when no detail photos follow, like a photo', () => {
+    let state = countReducer(emptyCount, { type: 'setPhotoAdded', photo: video('v1'), limit: 4, firstLook: true });
+    state = countReducer(state, { type: 'firstLookStarted', photoId: 'v1' });
+    state = countReducer(state, { type: 'firstLookSucceeded', photoId: 'v1', note: 'Counted from 3 views.', rows: rowsOf('v1', ['a', 'b']) });
+    state = countReducer(state, { type: 'openSetClosed' });
+
+    expect(state.photos[0]?.status).toEqual({ kind: 'done', note: 'Counted from 3 views.' });
+    expect(state.rows.map((row) => row.id)).toEqual(['a', 'b']);
+  });
+
+  it('lets go of the views once the video is counted, but still says how many there were', () => {
+    let state = countReducer(emptyCount, { type: 'setPhotoAdded', photo: video('v1'), limit: 4 });
+    state = countReducer(state, { type: 'setPhotoAdded', photo: photo('front'), limit: 4 });
+    state = countReducer(state, { type: 'openSetClosed' });
+    state = countReducer(state, { type: 'readingStarted', photoId: 'v1' });
+    expect(state.photos[0]?.views.map((view) => view.image.data)).toEqual(['v1-above', 'v1-side']);
+
+    state = countReducer(state, { type: 'readingSucceeded', photoId: 'v1', note: '', rows: rowsOf('v1', ['a']) });
+    const [counted] = state.photos;
+    expect(counted?.views.map((view) => view.image.data)).toEqual(['', '']);
+    expect(counted && viewCount(counted)).toBe(3);
+    // A video that could not be read keeps its views, to be sent again.
+    let failed = countReducer(emptyCount, { type: 'photoAdded', photo: video('v2') });
+    failed = countReducer(failed, { type: 'readingFailed', photoId: 'v2', message: 'No connection', retryable: true });
+    expect(failed.photos[0]?.views.map((view) => view.image.data)).toEqual(['v2-above', 'v2-side']);
+  });
+
+  it('a single photo is one view', () => {
+    expect(viewCount(photo('p1'))).toBe(1);
   });
 });

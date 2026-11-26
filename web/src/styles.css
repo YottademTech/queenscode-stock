@@ -370,6 +370,9 @@ details[open] > summary::after { transform: translateY(0.25rem) rotate(-135deg);
 .photo { background: var(--surface); border-radius: var(--round-m); padding: 0.45rem; box-shadow: var(--lift); }
 .photo img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 0.8rem; display: block; }
 .photo-status { font-size: 0.85rem; color: var(--muted); min-height: 1.2rem; padding-inline: 0.25rem; }
+/* Marks an entry whose stock was taken as a video: the picture shown is the first of its views. */
+.photo { position: relative; }
+.views-badge { position: absolute; top: 0.8rem; left: 0.8rem; padding: 0.15rem 0.5rem; border-radius: 10rem; font-size: 0.72rem; font-weight: 700; color: #fff; background: rgb(0 0 0 / 0.66); pointer-events: none; }
 .photo .button-row { margin: 0.2rem 0 0; }
 /* An open set is ringed in gold until it is sent to be counted. */
 .photo.open-set {
@@ -631,6 +634,9 @@ details[open] > summary::after { transform: translateY(0.25rem) rotate(-135deg);
 /* The choice between every photo counted on its own and a product's stock, front and back, made where the photos are taken. */
 .camera-mode { display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem; width: 100%; max-width: 22rem; min-width: 0; margin: 0; padding: 0.25rem; border: 0; border-radius: 10rem; background: rgb(255 255 255 / 0.16); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
 .camera-mode label { position: relative; display: flex; align-items: center; justify-content: center; min-height: 2.75rem; padding: 0 0.35rem; border-radius: 10rem; font-size: clamp(0.8rem, 3.9vw, 0.9rem); font-weight: 600; white-space: nowrap; cursor: pointer; }
+.camera-mode.three { grid-template-columns: repeat(3, 1fr); max-width: 24rem; }
+.camera-mode:disabled { opacity: 0.45; }
+.camera-mode:disabled label { cursor: not-allowed; }
 .camera-mode label:has(input:checked) { color: var(--black); background: var(--gold-shine); }
 .camera-mode label:has(input:focus-visible) { outline: 2px solid #fff; outline-offset: 2px; }
 /* The shutter stays in the middle; "Next" sits to its right when photo sets are on. */
@@ -648,6 +654,12 @@ details[open] > summary::after { transform: translateY(0.25rem) rotate(-135deg);
 .camera-close { font: inherit; font-weight: 600; display: inline-flex; align-items: center; gap: 0.35rem; min-height: 2.75rem; padding: 0 1rem; color: #fff; background: rgb(255 255 255 / 0.16); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); border: 1px solid rgb(255 255 255 / 0.4); border-radius: 10rem; cursor: pointer; }
 .camera-shutter { width: 4.75rem; height: 4.75rem; border-radius: 50%; cursor: pointer; background: var(--gold-shine); border: 0.3rem solid #fff; box-shadow: 0 0 0 0.15rem rgb(0 0 0 / 0.5), 0 0 28px rgb(212 175 55 / 0.5); transition: transform 0.15s var(--ease); }
 .camera-shutter:active { transform: scale(0.92); }
+/* A video set: a red button starts the video of the stock, and it turns into a square that stops it. */
+.camera-shutter.video, .camera-shutter.recording { background: #e5484d; box-shadow: 0 0 0 0.15rem rgb(0 0 0 / 0.5), 0 0 28px rgb(229 72 77 / 0.55); }
+.camera-shutter.recording { border-radius: 30%; transform: scale(0.72); }
+.camera-close:disabled { opacity: 0.4; cursor: not-allowed; }
+/* A product tapped while the list is still reloading: it opens as soon as the list is in. */
+.product-card[aria-busy='true'] { opacity: 0.6; }
 .camera-shutter:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Movement: a screen eases in when its tab is chosen, and new cards rise into place.

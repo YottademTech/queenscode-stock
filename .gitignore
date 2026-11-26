@@ -7,3 +7,6 @@ dist/
 
 # Raw shop photos sent for reference: business records, not part of the app.
 WhatsApp Image*
+
+# The stock server has its own repository (queenscode-stock-api), checked out here as server/.
+/server/

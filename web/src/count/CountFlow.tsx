@@ -8,12 +8,13 @@ import { submitSave } from '../lib/saves';
 import { unlockSounds } from '../lib/sounds';
 import { NoticeBox, PhotoButtons, SelectField, SwitchField, type Notice } from '../shared/fields';
 import { Icon } from '../shared/Icon';
-import { CameraSheet, canUseCamera, type CameraCount } from './CameraSheet';
+import { CameraSheet, canUseCamera, type CameraCount, type CaptureMode } from './CameraSheet';
+import { viewsThatFit } from './videoViews';
 import { CountRowCard } from './CountRowCard';
 import { ANY_PACK, containerAt, countingHint } from './containers';
 import {
   awaitsFirstLook, countReducer, countSummary, handRow, rowErrors, emptyCount, groupByLocation, photoCount, rowProblems, rowsFromAnalysis, rowsPerProduct, savedCount,
-  toCountRowInput, type CountRow, type Photo,
+  toCountRowInput, viewCount, type CountRow, type Photo,
 } from './countState';
 
 /** Claude takes a few seconds per photo, so several are read side by side. */
@@ -26,6 +27,8 @@ const PASSING_FAILURES = new Set(['network', 'busy', 'claude_unavailable', 'serv
 // A new key: photo sets became the default, and a choice of "off" saved before that should not keep
 // phones counting each photo of a product as a product of its own.
 const PHOTO_SETS_KEY = 'stock.photosets.v2';
+/** Whether a set's stock is taken as a video around it, not as one photo. Off until the counter chooses it. */
+const VIDEO_COUNT_KEY = 'stock.videocount';
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
@@ -36,6 +39,7 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
   const [location, setLocation] = useState(bootstrap.locations[0] ?? '');
   // On unless the counter chose "One by one": photos taken together are one product's stock, front and back.
   const [photoSets, setPhotoSets] = useState(() => rememberedChoice(PHOTO_SETS_KEY, true));
+  const [videoCount, setVideoCount] = useState(() => rememberedChoice(VIDEO_COUNT_KEY, false));
   const [cameraOpen, setCameraOpen] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   // The row being filled in by hand, in the panel on the right. It joins the list only when added.
@@ -78,7 +82,10 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
 
     startedPhotoIds.current.add(next.id);
     dispatch({ type: 'readingStarted', photoId: next.id });
-    void api.analyzeCount(next.location, [next.image, ...next.details.map((detail) => detail.image)]).then((result) => {
+    // With detail photos added, a video's views may no longer all fit in one request: then fewer go.
+    const details = next.details.map((detail) => detail.image);
+    const views = viewsThatFit([next.image, ...next.views.map((view) => view.image)], details, bootstrap.requestLimit);
+    void api.analyzeCount(next.location, [...views, ...details], views.length).then((result) => {
       startedPhotoIds.current.delete(next.id);
       if (!result.ok) {
         dispatch({ type: 'readingFailed', photoId: next.id, message: result.error.message, retryable: PASSING_FAILURES.has(result.error.code) });
@@ -90,15 +97,16 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
     });
   }, [state.photos]);
 
-  // A stock photo taken in the camera is counted on its own straight away, so the number shows in
-  // the camera while the counter takes the front and back. The whole set is still read on "Next".
+  // The stock taken in the camera, as a photo or as the views from a video, is counted on its own
+  // straight away, so the number shows in the camera while the counter takes the front and back.
+  // The whole set is still read on "Next".
   useEffect(() => {
     const wanted = state.photos.find((photo) => photo.firstLook?.kind === 'wanted' && !startedFirstLooks.current.has(photo.id));
     if (!wanted) return;
 
     startedFirstLooks.current.add(wanted.id);
     dispatch({ type: 'firstLookStarted', photoId: wanted.id });
-    void api.analyzeCount(wanted.location, [wanted.image]).then((result) => {
+    void api.analyzeCount(wanted.location, [wanted.image, ...wanted.views.map((view) => view.image)], viewCount(wanted)).then((result) => {
       if (!result.ok) {
         dispatch({ type: 'firstLookFailed', photoId: wanted.id });
         return;
@@ -134,11 +142,17 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
   // The option only exists when the Apps Script can take more than one photo.
   const setLimit = bootstrap.photoSetLimit;
   const usingSets = photoSets && setLimit > 1;
+  // Counting from a video needs a backend that takes several views, and the in-app camera.
+  const viewLimit = canUseCamera && setLimit > 1 ? bootstrap.countViewLimit : 1;
+  const captureMode: CaptureMode = !usingSets ? 'single' : videoCount && viewLimit > 1 ? 'video' : 'set';
   const openSet = state.photos.find((photo) => photo.status.kind === 'collecting') ?? null;
   const openSetSize = openSet ? photoCount(openSet) : 0;
+  const openSetHolds = !openSet ? ''
+    : openSet.views.length === 0 ? plural(openSetSize, 'photo', 'photos')
+      : openSet.details.length === 0 ? 'a video' : `a video and ${plural(openSet.details.length, 'photo', 'photos')}`;
 
   const progress = [
-    openSet && `1 set open (${plural(openSetSize, 'photo', 'photos')})`,
+    openSet && `1 set open (${openSetHolds})`,
     countingPhotos > 0 && `${plural(countingPhotos, 'photo', 'photos')} being counted`,
     savingRows > 0 && `${plural(savingRows, 'row', 'rows')} saving`,
     state.saved.length > 0 && `${state.saved.length} saved`,
@@ -153,9 +167,15 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
   const alreadyCounted = (row: CountRow) =>
     bootstrap.counted.find((entry) => entry.code === row.productCode && entry.location === row.location)?.pieces ?? 0;
 
-  const addPhoto = (prepared: PreparedPhoto, fromCamera = false) => {
-    const photo: Photo = { id: newId(), ...prepared, details: [], location, failures: 0, status: { kind: 'waiting' } };
+  // `views` are the other views of the same stock, when it was taken as a video around it.
+  const addPhoto = (prepared: PreparedPhoto, fromCamera = false, views: readonly PreparedPhoto[] = []) => {
+    const photo: Photo = { id: newId(), ...prepared, views, details: [], location, failures: 0, status: { kind: 'waiting' } };
     dispatch(usingSets ? { type: 'setPhotoAdded', photo, limit: setLimit, firstLook: fromCamera } : { type: 'photoAdded', photo });
+  };
+
+  // The first view stands for the video on this screen; all of them are counted together.
+  const addVideo = ([first, ...others]: PreparedPhoto[]) => {
+    if (first) addPhoto(first, true, others);
   };
 
   // "7 pieces", or "2 full sacks + 3 pieces" where the pieces in a full sack are not known yet.
@@ -214,6 +234,16 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
     if (!enabled) closeOpenSet();
   };
 
+  const handleVideoCountChange = (enabled: boolean) => {
+    setVideoCount(enabled);
+    rememberChoice(VIDEO_COUNT_KEY, enabled);
+  };
+
+  const handleModeChange = (mode: CaptureMode) => {
+    handlePhotoSetsChange(mode !== 'single');
+    if (mode !== 'single') handleVideoCountChange(mode === 'video');
+  };
+
   // Leaving the camera sends the set in hand, so nothing waits on a button the counter may not see.
   const handleCameraClose = () => {
     closeOpenSet();
@@ -270,6 +300,14 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
           onChange={handlePhotoSetsChange}
         />
       )}
+      {usingSets && viewLimit > 1 && (
+        <SwitchField
+          label="Count from a video"
+          hint={`In the camera, move the phone slowly around the stock instead of taking one photo. Up to ${viewLimit} views from different angles are counted together, so stock behind the front row can be seen.`}
+          checked={videoCount}
+          onChange={handleVideoCountChange}
+        />
+      )}
 
       <details className="tips">
         <summary>How to take a photo that can be counted</summary>
@@ -280,6 +318,7 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
           <li>Open bags and sacks are not full ones. Count what is left inside as loose pieces.</li>
           <li>Keep variants apart. Rich Glow black and Rich Glow yellow are different products.</li>
           {setLimit > 1 && <li>With front and back photos on: take the stock first, then close-ups of one item, label filling the frame, and the barcode close enough to read its digits. Only the first photo is counted.</li>}
+          {viewLimit > 1 && <li>Counting from a video: one product at a time. Move slowly, a few seconds, from the front, from above and from the sides, so every piece shows in at least one view. Pause a moment at each angle: a still view is a sharp one.</li>}
         </ul>
       </details>
 
@@ -292,7 +331,8 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
         <ul className="photo-strip" aria-label="Photos">
           {state.photos.map((photo, index) => (
             <li key={photo.id} className={`photo${photo.status.kind === 'collecting' ? ' open-set' : ''}`}>
-              <img src={photo.previewUrl} alt={`Photo ${index + 1}, ${photo.location}`} />
+              <img src={photo.previewUrl} alt={`${photo.views.length > 0 ? 'Video' : 'Photo'} ${index + 1}, ${photo.location}`} />
+              {photo.views.length > 0 && <span className="views-badge">Video · {plural(viewCount(photo), 'view', 'views')}</span>}
               {photo.details.length > 0 && (
                 <ul className="detail-photos" aria-label={`Detail photos of photo ${index + 1}`}>
                   {photo.details.map((detail, detailIndex) => (
@@ -316,8 +356,8 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
               )}
               <p className="photo-status">
                 {photo.status.kind === 'collecting' && (photo.details.length === 0
-                  ? 'This photo is counted. Add the front and back of the product, then count the set.'
-                  : `Counted photo plus ${plural(photo.details.length, 'detail photo', 'detail photos')}. Tap a detail photo to remove it.`)}
+                  ? `This ${photo.views.length > 0 ? 'video' : 'photo'} is counted. Add the front and back of the product, then count the set.`
+                  : `Counted ${photo.views.length > 0 ? 'video' : 'photo'} plus ${plural(photo.details.length, 'detail photo', 'detail photos')}. Tap a detail photo to remove it.`)}
                 {photo.status.kind === 'waiting' && (awaitsFirstLook(photo) ? 'Processing…' : 'Waiting its turn')}
                 {photo.status.kind === 'reading' && 'Processing…'}
                 {photo.status.kind === 'done' && (photo.status.note || 'Counted')}
@@ -492,11 +532,13 @@ export function CountFlow({ bootstrap, counter, onSaved }: CountFlowProps) {
           location={location}
           progress={progress}
           sets={setLimit > 1 ? {
-            on: photoSets, onChange: handlePhotoSetsChange, taken: openSetSize, limit: setLimit, onNext: closeOpenSet,
+            mode: captureMode, onModeChange: handleModeChange, viewLimit, requestLimit: bootstrap.requestLimit,
+            taken: openSetSize, limit: setLimit, onNext: closeOpenSet,
             count: cameraCount,
             onRetake: () => { if (openSet) dispatch({ type: 'photoRemoved', photoId: openSet.id }); },
           } : undefined}
           onShot={(photo) => addPhoto(photo, true)}
+          onVideo={addVideo}
           onClose={handleCameraClose}
         />
       )}

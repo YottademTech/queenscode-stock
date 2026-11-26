@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ADDED_HEADERS, COUNT_DATE, FakeSheet, SECRET, claudeAnswer, loadBackend, makeWorkbook } from './fakes.mjs';
+import { runInContext } from 'node:vm';
+import { ADDED_HEADERS, COUNT_DATE, FakeSheet, SECRET, SERVER_SECRET, claudeAnswer, loadBackend, makeWorkbook } from './fakes.mjs';
 
 const PHOTO = { data: Buffer.from('fake jpeg bytes').toString('base64'), mediaType: 'image/jpeg' };
 
@@ -326,6 +327,67 @@ test('a photo set that is empty, too large or holds a bad photo never reaches Cl
   assert.equal(backend.store.get('CLAUDE_CALLS_COUNT'), undefined, 'a refused set must not use up the daily limit');
 });
 
+test('stock taken as a video is sent as several views of the same stock, with how to count from them', () => {
+  const view = (name) => ({ data: Buffer.from(name).toString('base64'), mediaType: 'image/jpeg' });
+  const [front, above, side, label] = [view('front'), view('above'), view('side'), view('label close-up')];
+  const backend = loadBackend({
+    claudeReplies: [
+      claudeAnswer({ photoNote: '', items: [countedItem({ loosePieces: 12, confidence: 'High', note: 'View 2 shows 3 rows of 4.' })] }),
+      claudeAnswer({ photoNote: '', items: [countedItem({ loosePieces: 12, confidence: 'High', brand: 'Rich Glow', note: '' })] }),
+    ],
+  });
+  assert.equal(backend.post({ action: 'bootstrap' }).data.countViewLimit, 8);
+
+  // The views alone: this is what the app asks for as soon as the video ends.
+  const counted = backend.post({ action: 'analyzeCount', location: 'Shop shelf', images: [front, above, side], countViews: 3 });
+  assert.deepEqual([counted.data.items[0].loosePieces, counted.data.items[0].note], [12, 'View 2 shows 3 rows of 4.']);
+  const alone = backend.recorded.claudeRequests[0].body.messages[0].content;
+  assert.deepEqual(alone.filter((block) => block.type === 'text').slice(0, 3).map((block) => block.text), [
+    'View 1 of 3 of the stock:', 'View 2 of 3 of the stock:', 'View 3 of 3 of the stock:',
+  ]);
+  assert.deepEqual(alone.filter((block) => block.type === 'image').map((block) => block.source.data), [front.data, above.data, side.data]);
+  const question = alone[alone.length - 1].text;
+  assert.match(question, /^Location: Shop shelf\n\nProduct list:\nRG-BLK-500 \| /);
+  assert.match(question, /Several views of the same stock/);
+  assert.match(question, /Never add up the counts of two views/);
+  assert.match(question, /Count the stock shown in views 1 to 3\.$/);
+  assert.doesNotMatch(question, /Detail photos were added/);
+
+  // Then the views with the close-ups of one item.
+  const whole = backend.post({ action: 'analyzeCount', location: 'Shop shelf', images: [front, above, side, label], countViews: 3 });
+  assert.equal(whole.data.items[0].brand, 'Rich Glow');
+  const withDetail = backend.recorded.claudeRequests[1].body.messages[0].content;
+  assert.deepEqual(withDetail.filter((block) => block.type === 'text').slice(0, 4).map((block) => block.text), [
+    'View 1 of 3 of the stock:', 'View 2 of 3 of the stock:', 'View 3 of 3 of the stock:', 'Detail photo 1:',
+  ]);
+  assert.match(withDetail[withDetail.length - 1].text, /Count from the views only/);
+  assert.match(withDetail[withDetail.length - 1].text, /Count the stock shown in views 1 to 3 and record the details shown in the detail photo\.$/);
+  assert.equal(backend.store.get('CLAUDE_CALLS_COUNT'), '2', 'each request is one call, however many views it holds');
+});
+
+test('the number of views and of detail photos is bounded, and an app from before video counting is unaffected', () => {
+  const backend = loadBackend({ properties: { CLAUDE_CALLS_COUNT: null } });
+  const send = (count, countViews) => backend.post({ action: 'analyzeCount', location: 'Shop shelf', images: new Array(count).fill(PHOTO), countViews });
+
+  assert.match(send(9, 9).error.message, /A count takes 1 to 8 views/);
+  assert.match(send(3, 0).error.message, /A count takes 1 to 8 views/);
+  assert.match(send(3, 2.5).error.message, /A count takes 1 to 8 views/);
+  assert.match(send(3, '3').error.message, /A count takes 1 to 8 views/);
+  assert.match(send(2, 3).error.message, /Send the 3 views of the stock, and up to 3 photos for details/);
+  assert.match(send(12, 8).error.message, /Send the 8 views of the stock, and up to 3 photos for details/);
+  // Without countViews the old limit holds: five photos are still refused.
+  assert.match(send(5, undefined).error.message, /Send 1 to 4 photos/);
+  assert.equal(backend.recorded.claudeRequests.length, 0);
+  assert.equal(backend.store.get('CLAUDE_CALLS_COUNT'), undefined);
+
+  // Eight views and three detail photos is the most, and it goes through.
+  const full = loadBackend({ claudeReplies: [claudeAnswer({ photoNote: '', items: [] })] });
+  assert.equal(full.post({ action: 'analyzeCount', location: 'Shop shelf', images: new Array(11).fill(PHOTO), countViews: 8 }).ok, true);
+  const labels = full.recorded.claudeRequests[0].body.messages[0].content.filter((block) => block.type === 'text').map((block) => block.text);
+  assert.deepEqual([labels[0], labels[7], labels[8], labels[10]], ['View 1 of 8 of the stock:', 'View 8 of 8 of the stock:', 'Detail photo 1:', 'Detail photo 3:']);
+  assert.match(labels[11], /record the details shown in the 3 detail photos\.$/);
+});
+
 // --- Saving counts ---------------------------------------------------------
 
 test('confirmed rows fill the first empty Claude_Counts rows without touching the formula columns', () => {
@@ -389,7 +451,8 @@ test('every detail of a new product is stored in the Products tab and comes back
   ]);
 
   const saved = backend.post({ action: 'bootstrap' }).data.products[2];
-  assert.deepEqual(saved, { ...details, code: 'QBHRWT-200', packSize: null, reorderLevel: null, imageUrl: '', imageUrls: [], price: null, currency: '' });
+  assert.match(saved.version, /^[0-9a-f]{1,8}$/);
+  assert.deepEqual(saved, { ...details, code: 'QBHRWT-200', packSize: null, reorderLevel: null, imageUrl: '', imageUrls: [], price: null, currency: '', version: saved.version });
 
   const tooLong = backend.post(saveCounts([countRow({ productCode: null, newProduct: { name: 'X', labelText: 'a'.repeat(5001) } })], { requestId: 'request-0003' }));
   assert.match(tooLong.error.message, /label text is too long/);
@@ -517,8 +580,10 @@ test('a new product is saved with its own photo stored in Drive', () => {
   assert.match(file.name, /^QBHGO-250-\d+\.jpg$/);
   assert.equal(Buffer.from(file.bytes).toString(), 'fake jpeg bytes');
 
+  // The same save arriving again writes nothing, and the photo it brought is not left behind.
   assert.deepEqual(backend.post(saveProduct({}, { image: PHOTO })).data, { duplicate: true });
-  assert.equal(backend.recorded.driveFiles.length, 1, 'a resent save must not upload the photo again');
+  assert.deepEqual(backend.recorded.driveUpdates, [{ fileId: 'file-2', trashed: true }]);
+  assert.equal(productRows(backend.workbook)[2][8], 'https://drive.google.com/file/d/file-1/view');
 });
 
 test('editing a product fills its details and photo but leaves its code and name alone', () => {
@@ -582,17 +647,101 @@ test('an app from before several photos still adds its one photo, without losing
   assert.equal(backend.post({ action: 'bootstrap' }).data.productPhotoLimit, 10);
 });
 
-test('too many photos for a product, or in one save, are refused before anything is stored', () => {
+test('too many photos for a product, or in one save, are refused, and none of them is kept', () => {
   const backend = loadBackend();
   const seven = new Array(7).fill(PHOTO);
   assert.match(backend.post(saveProduct({}, { images: seven })).error.message, /at most 6 photos at a time/);
+  assert.equal(backend.recorded.driveFiles.length, 0, 'a save that can be refused from the request alone stores nothing');
 
   backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion' }, { requestId: 'request-0102', images: new Array(6).fill(PHOTO) }));
   const kept = [1, 2, 3, 4, 5, 6].map(link);
   const tooMany = backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion' }, { requestId: 'request-0103', keepImageUrls: kept, images: new Array(5).fill(PHOTO) }));
   assert.match(tooMany.error.message, /up to 10 photos/);
-  assert.equal(backend.recorded.driveFiles.length, 6, 'nothing is uploaded for a refused save');
+  // Whether a product has room is only known under the lock, after the photos were stored: they are removed again.
+  assert.deepEqual(backend.recorded.driveUpdates.map((update) => update.fileId), ['file-7', 'file-8', 'file-9', 'file-10', 'file-11']);
   assert.equal(photoCell(backend), kept.join('\n'));
+});
+
+test('removed photos are named, so a photo someone else just added is not lost', () => {
+  const backend = loadBackend();
+  backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion' }, { images: [PHOTO, PHOTO] }));
+  // Another phone, still showing photos 1 and 2, removes photo 1 after a third was added elsewhere.
+  backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion' }, { requestId: 'request-0102', images: [PHOTO] }));
+  const reply = backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion' }, {
+    requestId: 'request-0103', removeImageUrls: [link(1), 'https://evil.example/x'], keepImageUrls: [link(2)],
+  }));
+
+  assert.equal(reply.ok, true);
+  assert.equal(photoCell(backend), [link(2), link(3)].join('\n'));
+  assert.deepEqual(backend.recorded.driveUpdates, [{ fileId: 'file-1', trashed: true }]);
+});
+
+const versionOf = (backend, code) => backend.post({ action: 'bootstrap' }).data.products.find((p) => p.code === code).version;
+
+test('an edit made from an older copy of a product is refused, and nothing is written', () => {
+  const backend = loadBackend();
+  const opened = versionOf(backend, 'RG-YEL');
+  const edit = (product, overrides) => saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion', ...product }, overrides);
+
+  // Two people open the product. The first saves a brand.
+  assert.equal(backend.post(edit({ brand: 'Rich Glow' }, { productVersion: opened })).ok, true);
+  assert.notEqual(versionOf(backend, 'RG-YEL'), opened);
+
+  // The second, whose form has no brand, would wipe it. With a photo, so that is not kept either.
+  const stale = backend.post(edit({ brand: '', variant: 'Yellow' }, { requestId: 'request-0102', productVersion: opened, images: [PHOTO] }));
+  assert.equal(stale.error.code, 'conflict');
+  assert.match(stale.error.message, /This product was changed after you opened it/);
+  assert.deepEqual(backend.workbook.get('Products').rowValues(3, 11).slice(9), ['Rich Glow', '']);
+  assert.deepEqual(backend.recorded.driveUpdates, [{ fileId: 'file-1', trashed: true }], 'the photo of a refused save is not left behind');
+  assert.equal(photoCell(backend), '');
+
+  // Opened again, the same change goes through. A resend of it is not mistaken for a stale edit.
+  const again = edit({ brand: 'Rich Glow', variant: 'Yellow' }, { requestId: 'request-0103', productVersion: versionOf(backend, 'RG-YEL'), images: [PHOTO] });
+  assert.deepEqual(backend.post(again).data, { duplicate: false });
+  assert.deepEqual(backend.post(again).data, { duplicate: true });
+  assert.equal(photoCell(backend), link(2));
+  assert.deepEqual(backend.recorded.driveUpdates.map((update) => update.fileId), ['file-1', 'file-3']);
+
+  // An app from before versions sends none and is not checked.
+  assert.equal(backend.post(edit({ brand: 'Rich Glow' }, { requestId: 'request-0104' })).ok, true);
+});
+
+test('a count that fills in a product detail also makes an open edit of that product stale', () => {
+  const backend = loadBackend();
+  const opened = versionOf(backend, 'RG-YEL');
+  backend.post(saveCounts([countRow({ productCode: 'RG-YEL', details: { ...noDetails, name: 'Rich Glow Yellow Tone Lotion', barcode: '0603400012347' } })]));
+
+  const stale = backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion' }, { requestId: 'request-0102', productVersion: opened }));
+  assert.equal(stale.error.code, 'conflict');
+  assert.equal(backend.workbook.get('Products').rowValues(3, 4)[3], '0603400012347', 'the barcode read from the photo stays');
+});
+
+test('photos are stored and trashed outside the lock, so a save with photos does not hold up other saves', () => {
+  const backend = loadBackend();
+  backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion' }, { images: [PHOTO, PHOTO, PHOTO] }));
+  backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion' }, { requestId: 'request-0102', removeImageUrls: [link(1)], images: [PHOTO] }));
+
+  assert.equal(photoCell(backend), [link(2), link(3), link(4)].join('\n'));
+  assert.deepEqual(backend.recorded.driveUpdates, [{ fileId: 'file-1', trashed: true }]);
+  assert.equal(backend.recorded.driveCallsUnderLock, 0);
+});
+
+test('photos stored for a save that then fails are moved to the Drive trash', () => {
+  // Another save holds the lock for too long.
+  const busy = loadBackend();
+  busy.recorded.lockBusy = true;
+  assert.equal(busy.post(saveProduct({}, { images: [PHOTO, PHOTO] })).error.code, 'busy');
+  assert.deepEqual(busy.recorded.driveUpdates, [{ fileId: 'file-1', trashed: true }, { fileId: 'file-2', trashed: true }]);
+  assert.equal(productRows(busy.workbook).length, 2, 'no product was added');
+
+  // Someone else changes the product while this save's photo is uploading.
+  const raced = loadBackend();
+  const opened = versionOf(raced, 'RG-YEL');
+  raced.recorded.whileUploading = () => raced.workbook.get('Products').getRange(3, 10).setValue('Rich Glow');
+  const reply = raced.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion' }, { productVersion: opened, images: [PHOTO] }));
+  assert.equal(reply.error.code, 'conflict');
+  assert.deepEqual(raced.recorded.driveUpdates, [{ fileId: 'file-1', trashed: true }]);
+  assert.equal(photoCell(raced), '');
 });
 
 const priceCells = (backend, row = 3) => backend.workbook.get('Products').rowValues(row, 23).slice(21);
@@ -682,7 +831,12 @@ test('a product save is refused for a duplicate name, an unknown code, bad detai
   for (let row = 4; row <= 201; row++) workbook.get('Products').write(row, 1, `P-${row}`);
   const full = loadBackend({ workbook });
   assert.equal(full.post(saveProduct({}, { image: PHOTO })).error.code, 'sheet_full');
-  assert.equal(full.recorded.driveFiles.length, 0);
+  assert.deepEqual(full.recorded.driveUpdates, [{ fileId: 'file-1', trashed: true }], 'the photo of a refused save is not left behind');
+
+  // A request with no usable ID is refused before its photo is stored.
+  const unusable = loadBackend();
+  assert.equal(unusable.post(saveProduct({}, { requestId: 'short', image: PHOTO })).error.code, 'invalid_request');
+  assert.equal(unusable.recorded.driveFiles.length, 0);
 });
 
 // --- Hand counts -----------------------------------------------------------
@@ -899,4 +1053,224 @@ test('the script asks Google only for narrow permissions, never all of Drive or 
   for (const call of ['DriveApp.', 'SpreadsheetApp.open', 'SpreadsheetApp.create', 'getUi(', 'HtmlService', 'MailApp', 'GmailApp']) {
     assert.equal(code.split('\n').filter((line) => !line.trim().startsWith('*') && line.includes(call)).length, 0, `Code.gs must not use ${call}`);
   }
+});
+
+// --- For the stock server --------------------------------------------------
+
+const mirror = (event, requestId = 'mirror-0001') => ({ action: 'mirror', secret: SERVER_SECRET, requestId, event });
+const mirroredProduct = (overrides = {}) => ({
+  ...noDetails, code: 'QBHCO-100', name: 'QBH Carrot Oil', size: '100ml', barcode: '0603400012347',
+  packSize: 24, reorderLevel: 6, imageUrls: [link(7), link(8)], price: 25.5, currency: 'GHS', version: '3', ...overrides,
+});
+
+test('a product saved by the stock server is written to its own row, once, and again when it changes', () => {
+  const backend = loadBackend();
+  assert.deepEqual(backend.post(mirror({ kind: 'product', product: mirroredProduct() })).data, { duplicate: false });
+  assert.deepEqual(backend.post(mirror({ kind: 'product', product: mirroredProduct() })).data, { duplicate: true });
+
+  const row = backend.workbook.get('Products').rowValues(4, 23);
+  assert.deepEqual(row.slice(0, 6), ['QBHCO-100', 'QBH Carrot Oil', '100ml', '0603400012347', 24, 6]);
+  assert.equal(row[8], [link(7), link(8)].join('\n'));
+  assert.deepEqual(row.slice(21), [25.5, 'GHS']);
+  assert.equal(productRows(backend.workbook).length, 3);
+
+  // The same code again is the same row: an edit, not a second product.
+  backend.post(mirror({ kind: 'product', product: mirroredProduct({ brand: 'QBH', imageUrls: [], price: null, currency: '' }) }, 'mirror-0002'));
+  const edited = backend.workbook.get('Products').rowValues(4, 23);
+  assert.equal(productRows(backend.workbook).length, 3);
+  assert.deepEqual([edited[8], edited[9], edited[21], edited[22]], ['', 'QBH', '', '']);
+
+  const refused = backend.post(mirror({ kind: 'product', product: mirroredProduct({ code: 'X-1', name: 'Other', currency: 'JPY' }) }, 'mirror-0003'));
+  assert.equal(refused.error.code, 'invalid_request');
+  assert.equal(backend.post(mirror({ kind: 'nonsense' }, 'mirror-0004')).error.code, 'invalid_request');
+});
+
+test('counts, hand entries, a new count date and a delete from the stock server reach the Sheet as sent', () => {
+  const backend = loadBackend();
+  const counts = backend.workbook.get('Claude_Counts');
+  backend.post(mirror({
+    kind: 'counts', countDate: '2026-11-23', location: 'Warehouse bags', counter: 'Atsu',
+    rows: [{ code: 'RG-YEL', fullCartons: 2, packSize: null, loosePieces: 3, confidence: 'Low', note: 'Pile.' }, { code: 'RG-BLK-500', fullCartons: 0, packSize: 12, loosePieces: 1, confidence: 'High', note: '' }],
+  }));
+  assert.ok(sameDay(counts.rowValues(3, 1)[0]), 'filed under the open stocktake\'s own date value');
+  assert.deepEqual(counts.rowValues(3, 10).slice(1), ['Warehouse bags', 'RG-YEL', '=formula', 2, '', 3, '=formula', 'Low', '[Atsu] Pile.']);
+  assert.deepEqual(counts.rowValues(4, 10).slice(4), [0, 12, 1, '=formula', 'High', '[Atsu]']);
+
+  const hand = backend.workbook.get('Form_Adjustments');
+  backend.post(mirror({
+    kind: 'adjustment', at: '2026-11-25T10:15:00.000Z', counter: 'Jonathan', countDate: '2026-11-23', location: 'Shop shelf',
+    productName: 'Rich Glow Yellow Tone Lotion', type: 'remove', quantity: 2, reason: '=cmd',
+  }, 'mirror-0002'));
+  const entry = hand.rowValues(3, 8);
+  assert.equal(entry[0].toISOString(), '2026-11-25T10:15:00.000Z');
+  assert.deepEqual(entry.slice(3), ['Shop shelf', 'Rich Glow Yellow Tone Lotion', 'Remove stock', 2, "'=cmd"]);
+
+  backend.post(mirror({ kind: 'settings', countDate: '2026-12-01' }, 'mirror-0003'));
+  assert.equal(backend.workbook.get('Settings').rowValues(3, 2)[1].toISOString().slice(0, 10), '2026-12-01');
+
+  backend.post(mirror({ kind: 'productDeleted', code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion' }, 'mirror-0004'));
+  assert.deepEqual(productRows(backend.workbook).map((cells) => cells[0]), ['RG-BLK-500']);
+  assert.equal(hand.rowValues(3, 8)[4], '', 'its hand entries went with it');
+  // A product the Sheet never had is not an error.
+  assert.equal(backend.post(mirror({ kind: 'productDeleted', code: 'NEVER', name: 'x' }, 'mirror-0005')).ok, true);
+
+  const wrongPlace = backend.post(mirror({ kind: 'counts', countDate: '2026-11-23', location: 'Elsewhere', counter: 'A', rows: [{ code: 'RG-YEL', fullCartons: 0, packSize: null, loosePieces: 1, confidence: 'High', note: '' }] }, 'mirror-0006'));
+  assert.equal(wrongPlace.error.code, 'invalid_request');
+});
+
+test('the stock server stores product photos in Drive, and trashes the ones it no longer needs', () => {
+  const backend = loadBackend();
+  const asServer = (request) => backend.post({ secret: SERVER_SECRET, ...request });
+  const stored = asServer({ action: 'storeImages', code: 'QBHCO-100', images: [PHOTO, PHOTO] });
+  assert.deepEqual(stored.data, { urls: [link(1), link(2)] });
+  assert.match(backend.recorded.driveFiles[1].name, /^QBHCO-100-\d+\.jpg$/);
+  assert.equal(asServer({ action: 'storeImages', code: 'X', images: [] }).error.code, 'invalid_request');
+
+  assert.deepEqual(asServer({ action: 'trashImages', urls: [link(2), 'https://elsewhere.example/x'] }).data, { trashed: 2 });
+  assert.deepEqual(backend.recorded.driveUpdates, [{ fileId: 'file-2', trashed: true }]);
+});
+
+test('the whole Sheet can be read out, row by row, for the stock server to start from', () => {
+  const backend = loadBackend();
+  backend.post({ action: 'adjust', requestId: 'request-0900', location: 'Shop shelf', counter: 'Ama', productCode: 'RG-YEL', type: 'add', quantity: 4, reason: 'Found' });
+  const all = backend.post({ action: 'exportAll', secret: SERVER_SECRET }).data;
+
+  assert.equal(all.countDate, '2026-11-23');
+  assert.deepEqual(all.locations, ['Shop shelf', 'Warehouse bags', 'Warehouse sacks']);
+  assert.deepEqual(all.products.map((product) => product.code), ['RG-BLK-500', 'RG-YEL']);
+  assert.deepEqual(all.counts, [{
+    countDate: '2026-11-23', location: 'Shop shelf', code: 'RG-YEL', fullCartons: 0, packSize: null, loosePieces: 8, confidence: 'Medium', note: 'Photo 18:49.',
+  }]);
+  assert.equal(all.currencies[0].code, 'GHS');
+  const added = all.adjustments.find((entry) => entry.type === 'add');
+  assert.deepEqual({ ...added, at: '' }, { at: '', counter: 'Ama', countDate: '2026-11-23', location: 'Shop shelf', productName: 'Rich Glow Yellow Tone Lotion', type: 'add', quantity: 4, reason: 'Found' });
+});
+
+test('the stock server\'s actions open only with the server\'s own secret, never with the one inside the app', () => {
+  const backend = loadBackend();
+  const serverActions = ['serverInfo', 'mirror', 'storeImages', 'trashImages', 'exportAll'];
+
+  // The app's secret is in every phone's copy of the app. It must not reach these.
+  for (const action of serverActions) {
+    assert.deepEqual(backend.post({ action }).error, { code: 'unauthorized', message: 'Wrong or missing server secret.' }, action);
+  }
+  assert.deepEqual(backend.post({ action: 'serverInfo', secret: SERVER_SECRET }).data, { actions: serverActions });
+  // And the server's secret does not open the app's actions, nor does the app learn of the server's.
+  assert.equal(backend.post({ action: 'bootstrap', secret: SERVER_SECRET }).error.code, 'unauthorized');
+  assert.deepEqual(backend.post({ action: 'bootstrap' }).data.actions.filter((action) => serverActions.includes(action)), []);
+
+  // Until SERVER_SECRET is set, the server's actions are switched off, and the app works as before.
+  const notSetUp = loadBackend({ properties: { SERVER_SECRET: null } });
+  assert.equal(notSetUp.post({ action: 'mirror', secret: SECRET, requestId: 'mirror-0001', event: { kind: 'settings', countDate: '1999-01-01' } }).error.code, 'not_configured');
+  assert.equal(notSetUp.post({ action: 'bootstrap' }).ok, true);
+  assert.equal(notSetUp.workbook.get('Settings').rowValues(3, 2)[1].toISOString().slice(0, 10), '2026-11-23');
+
+  // Setting it to the app's secret would undo the point of it.
+  const sameAsApp = loadBackend({ properties: { SERVER_SECRET: SECRET } });
+  assert.match(sameAsApp.post({ action: 'exportAll', secret: SECRET }).error.message, /must be different from APP_SECRET/);
+});
+
+test('a save that fails after it began writing keeps its photos: the row may already link them', () => {
+  const backend = loadBackend();
+  const log = backend.workbook.get('App_Requests');
+  const appendRow = log.appendRow.bind(log);
+  let failing = true;
+  // The product row is written, then noting the request fails, as a Sheets time-out would.
+  log.appendRow = (cells) => {
+    if (failing) { failing = false; throw new Error('Service Spreadsheets timed out'); }
+    appendRow(cells);
+  };
+
+  const reply = backend.post(saveProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion' }, { image: PHOTO }));
+  assert.equal(reply.error.code, 'internal');
+  assert.equal(photoCell(backend), link(1));
+  assert.deepEqual(backend.recorded.driveUpdates, [], 'a photo the row links must not go to the trash');
+});
+
+test('a code from the stock server cannot put a formula into the Sheet', () => {
+  const backend = loadBackend();
+  backend.post(mirror({ kind: 'product', product: mirroredProduct({ code: '=IMPORTXML("https://x.example","//a")', name: 'Odd code' }) }));
+  backend.post(mirror({ kind: 'counts', countDate: '2026-11-23', location: 'Shop shelf', counter: 'A', rows: [{ code: '+SUM(1)', fullCartons: 0, packSize: null, loosePieces: 1, confidence: 'High', note: '' }] }, 'mirror-0002'));
+
+  assert.equal(backend.workbook.get('Products').rowValues(4, 1)[0], '\'=IMPORTXML("https://x.example","//a")');
+  assert.equal(backend.workbook.get('Claude_Counts').rowValues(3, 3)[2], "'+SUM(1)");
+});
+
+test('deleting a product the Sheet never held still clears what was counted for it', () => {
+  const backend = loadBackend();
+  // The Sheet has counts and a hand entry for a product whose own row never arrived.
+  backend.post(mirror({ kind: 'counts', countDate: '2026-11-23', location: 'Shop shelf', counter: 'A', rows: [{ code: 'GHOST-1', fullCartons: 0, packSize: null, loosePieces: 4, confidence: 'High', note: '' }] }));
+  backend.post(mirror({ kind: 'adjustment', at: '2026-11-25T10:15:00.000Z', counter: 'A', countDate: '2026-11-23', location: 'Shop shelf', productName: 'Ghost Product', type: 'add', quantity: 2, reason: '' }, 'mirror-0002'));
+  const hand = backend.workbook.get('Form_Adjustments');
+  assert.equal(hand.rowValues(3, 8)[4], 'Ghost Product');
+
+  assert.equal(backend.post(mirror({ kind: 'productDeleted', code: 'GHOST-1', name: 'Ghost Product' }, 'mirror-0003')).ok, true);
+  assert.equal(backend.workbook.get('Claude_Counts').rowValues(3, 3)[2], '');
+  assert.equal(hand.rowValues(3, 8)[4], '');
+  assert.equal(productRows(backend.workbook).length, 2, 'the products that are there are untouched');
+});
+
+test('a name lengthened by its size stays a valid name, and a code is never one Sheets reads as a date or number', () => {
+  const backend = loadBackend();
+  const longName = 'QBH ' + 'Very Long Product Name '.repeat(5).trim();
+  assert.equal(longName.length, 118);
+  backend.post(saveProduct({ name: longName, size: '250ml' }));
+  // The same name in another size is another product, told apart by its size at the end of the name.
+  const reply = backend.post(saveCounts([countRow({ productCode: null, newProduct: newProduct({ name: longName, size: '500ml family size', barcode: '' }) })]));
+  assert.equal(reply.ok, true);
+  const second = backend.post({ action: 'bootstrap' }).data.products[3];
+  assert.equal(second.name.length <= 120, true);
+  assert.match(second.name, /^QBH Very Long .* 500ml family size$/);
+  // It can be edited afterwards: its own name is accepted back.
+  assert.equal(backend.post(saveProduct({ code: second.code, name: second.name, size: second.size }, { requestId: 'request-0102' })).ok, true);
+
+  const codeFor = (name, size, n) => {
+    backend.post(saveProduct({ name, size }, { requestId: `request-03${n}0` }));
+    return backend.post({ action: 'bootstrap' }).data.products.find((product) => product.name === name).code;
+  };
+  // SEP-30 would become 30 September in a Sheet cell, and 247-100 a number or a date.
+  assert.equal(codeFor('Shea Essence Perfume', '30ml', 1), 'P-SEP-30');
+  assert.equal(codeFor('24 7 Serum', '100ml', 2), 'P-247S-100');
+  assert.equal(codeFor('MAY', '5ml', 3), 'P-MAY-5');
+  assert.equal(codeFor('MAY Cream', '5ml', 4), 'MAYC-5');
+  assert.equal(codeFor('QBH Rose Water', '200ml', 5), 'QBHRW-200');
+});
+
+test('reading the Sheet out names the hand entries it cannot carry over, and the saves already written', () => {
+  const backend = loadBackend();
+  backend.post({ action: 'adjust', requestId: 'request-0900', location: 'Shop shelf', counter: 'Ama', productCode: 'RG-YEL', type: 'add', quantity: 4, reason: 'Found' });
+  const entry = (at, type, quantity, date = COUNT_DATE) => [at, 'Ama', date, 'Shop shelf', 'Rich Glow Yellow Tone Lotion', type, quantity, ''];
+  backend.workbook.get('Form_Adjustments').fill(4, [
+    entry('', 'Add stock', 5),                  // typed into the Sheet with no timestamp: the Stock tab counts it
+    entry('', 'Correct the count', 9),          // a correction with no timestamp: the Stock tab ignores it
+    entry(new Date(), 'Add stock', 2.5),
+    entry(new Date(), 'Donate', 1),
+    entry(new Date(), 'Remove stock', 1, 'last week'),
+  ]);
+  const all = backend.post({ action: 'exportAll', secret: SERVER_SECRET }).data;
+
+  assert.deepEqual(all.adjustments.filter((row) => row.at === '').map((row) => [row.type, row.quantity]), [['add', 5]]);
+  assert.deepEqual(all.leftOut, [
+    { tab: 'Form_Adjustments', row: 5, why: 'it is a correction with no timestamp, which the Stock tab ignores too' },
+    { tab: 'Form_Adjustments', row: 6, why: 'its quantity is not a whole number' },
+    { tab: 'Form_Adjustments', row: 7, why: 'its type is not one of the three in Settings' },
+    { tab: 'Form_Adjustments', row: 8, why: 'it has no count date' },
+  ]);
+  assert.deepEqual(all.handledRequests, [{ id: 'request-0900', action: 'adjust' }]);
+});
+
+test('a read that was cut off after running long is not sent, and paid for, a second time', () => {
+  let clock = 1700000000000;
+  const backend = loadBackend({
+    claudeReplies: () => {
+      clock += 45000; // the request ran 45 seconds before the connection was cut
+      throw new Error('Timeout');
+    },
+  });
+  runInContext('Date', backend.context).now = () => clock;
+
+  const reply = backend.post({ action: 'analyzeCount', location: 'Shop shelf', image: PHOTO });
+  assert.equal(reply.error.code, 'claude_unavailable');
+  assert.match(reply.error.message, /took too long/);
+  assert.equal(backend.recorded.claudeRequests.length, 1);
 });

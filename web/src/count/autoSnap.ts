@@ -7,11 +7,11 @@ export const FRAME_SIDE = 64;
 // Brightness and differences are on the 0 to 255 scale of a grey pixel. The limits were chosen on
 // simulated footage, not measured on phones, so they are kept together here to be tuned.
 /** Darker than this on average, the stock cannot be seen. */
-const DARK_BELOW = 28;
+export const DARK_BELOW = 28;
 /** Two looks this alike mean the phone is being held still. */
 const STEADY_BELOW = 6;
 /** Less edge than this means a blank wall, a covered lens or a blur. */
-const SHARP_ABOVE = 2.5;
+export const SHARP_ABOVE = 2.5;
 /** A look this different from the last photo means the phone has moved on to something else. */
 const MOVED_ABOVE = 18;
 /** How long the picture must stay steady before the photo is taken. */
@@ -29,7 +29,7 @@ export type Watch =
 
 export type Look = { snap: boolean; watch: Watch };
 
-type Grey = Uint8Array | Uint8ClampedArray;
+export type Grey = Uint8Array | Uint8ClampedArray;
 
 /** How different two looks are: the average change of a pixel. */
 export function difference(a: Grey, b: Grey): number {

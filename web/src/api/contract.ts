@@ -37,6 +37,9 @@ export const productSchema = z
     price: z.number().nullable().default(null),
     /** ISO 4217 code of the price's currency, such as GHS; empty when there is no price. */
     currency: z.string().default(''),
+    // A fingerprint of the product as loaded, sent back with an edit so the Apps Script can refuse
+    // one made from an older copy. An Apps Script from before this sends none, and checks nothing.
+    version: z.string().optional(),
   })
   .transform((product) => ({ ...product, imageUrls: product.imageUrls ?? (product.imageUrl ? [product.imageUrl] : []) }));
 export type Product = z.infer<typeof productSchema>;
@@ -54,6 +57,13 @@ export const bootstrapSchema = z.object({
   // How many photos one count request may hold: the count photo plus detail photos. An Apps Script
   // from before photo sets does not say, and reads one photo.
   photoSetLimit: z.number().int().min(1).default(1),
+  // How many views of the same stock one count may hold: the moments kept from a video taken around
+  // it. A backend from before counting from a video does not say, and counts from one photo.
+  countViewLimit: z.number().int().min(1).default(1),
+  // How much photo data one request may carry, in base64 characters. Hosts differ a great deal
+  // (some refuse anything over 4.5 MB), so the app sizes a video's views to fit. An older backend
+  // does not say.
+  requestLimit: z.number().int().positive().optional(),
   // How many photos one product can hold. An Apps Script from before several photos keeps one, and
   // replaces it when a new one is sent.
   productPhotoLimit: z.number().int().min(1).default(1),
@@ -158,8 +168,12 @@ export type SaveProductInput = {
   image?: EncodedImage | null;
   /** New photos, added after the kept ones. */
   images?: EncodedImage[];
-  /** The product's photos to keep, in order; any other photo it had is removed. */
+  /** The product's photos that were removed here. A photo someone else added meanwhile is not among them, and stays. */
+  removeImageUrls?: string[];
+  /** The photos to keep, for an Apps Script from before `removeImageUrls`; a newer one goes by the removed ones. */
   keepImageUrls?: string[];
+  /** The version of the product this edit started from. */
+  productVersion?: string;
 };
 
 /** A product's price: null clears it. Left out of a save, the price in the Sheet is kept. */

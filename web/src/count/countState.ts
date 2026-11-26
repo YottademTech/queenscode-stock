@@ -26,7 +26,12 @@ export type Photo = {
   id: string;
   previewUrl: string;
   image: EncodedImage;
-  /** Close-ups of the same stock (front, back, markings). Claude reads them with the photo, in one request, and counts only the photo. */
+  /**
+   * More views of the same stock, kept from a video taken around it. They are counted together
+   * with the photo, as one arrangement seen from several angles. Empty for a single photo.
+   */
+  views: readonly PreparedPhoto[];
+  /** Close-ups of the same stock (front, back, markings). Claude reads them in the same request, and counts only the photo and its views. */
   details: readonly PreparedPhoto[];
   /** The place chosen when the photo was taken. It stays with the photo when the counter moves on. */
   location: string;
@@ -203,10 +208,14 @@ export function awaitsFirstLook(photo: Photo): boolean {
 
 function finishWith(state: CountState, photoId: string, note: string, rows: readonly CountRow[]): CountState {
   return {
-    ...withPhoto(state, photoId, (photo) => ({ ...photo, status: { kind: 'done', note } })),
+    // Once counted, the other views of a video are not needed again, and they are the largest
+    // thing held for it. Their pictures are let go; how many there were stays, for the screen.
+    ...withPhoto(state, photoId, (photo) => ({ ...photo, status: { kind: 'done', note }, views: photo.views.map(() => EMPTY_VIEW) })),
     rows: [...state.rows, ...rows],
   };
 }
+
+const EMPTY_VIEW: PreparedPhoto = { image: { data: '', mediaType: 'image/jpeg' }, previewUrl: '' };
 
 /** The server's limit on a row's note. */
 const NOTE_MAX = 300;
@@ -325,9 +334,14 @@ export function countSummary(rows: readonly CountRow[], products: readonly Produ
   return { pieces, unsizedPacks, label };
 }
 
-/** How many photos this entry sends to Claude: the count photo plus its detail photos. */
+/** The size of a set: its stock, taken as one photo or as one video, plus its detail photos. */
 export function photoCount(photo: Photo): number {
   return 1 + photo.details.length;
+}
+
+/** How many pictures of the stock are counted together: the photo, plus the other views from a video. */
+export function viewCount(photo: Photo): number {
+  return 1 + photo.views.length;
 }
 
 /**

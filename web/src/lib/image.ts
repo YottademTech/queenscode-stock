@@ -22,13 +22,22 @@ export async function preparePhoto(file: File, longEdge: number): Promise<Prepar
   }
 }
 
+/**
+ * Long edge and JPEG quality for the views kept from a video taken around the stock. Smaller than a
+ * count photo: several are sent together, and the whole request has to stay a size a phone can send.
+ */
+export const VIDEO_VIEW_EDGE = 1280;
+export const VIDEO_VIEW_QUALITY = 0.75;
+
 /** Takes the frame the in-app camera is showing right now. */
-export function captureFrame(video: HTMLVideoElement, longEdge: number): PreparedPhoto {
+export function captureFrame(video: HTMLVideoElement, longEdge: number, quality = PHOTO_QUALITY): PreparedPhoto {
   if (video.videoWidth === 0) throw new Error('The camera is not ready yet.');
-  return toJpeg(video, video.videoWidth, video.videoHeight, longEdge);
+  return toJpeg(video, video.videoWidth, video.videoHeight, longEdge, quality);
 }
 
-function toJpeg(source: CanvasImageSource, width: number, height: number, longEdge: number): PreparedPhoto {
+const PHOTO_QUALITY = 0.82;
+
+function toJpeg(source: CanvasImageSource, width: number, height: number, longEdge: number, quality = PHOTO_QUALITY): PreparedPhoto {
   const scale = Math.min(1, longEdge / Math.max(width, height));
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(width * scale);
@@ -38,7 +47,7 @@ function toJpeg(source: CanvasImageSource, width: number, height: number, longEd
   if (!drawing) throw new Error('This browser cannot resize photos.');
   drawing.drawImage(source, 0, 0, canvas.width, canvas.height);
 
-  const previewUrl = canvas.toDataURL('image/jpeg', 0.82);
+  const previewUrl = canvas.toDataURL('image/jpeg', quality);
   const data = previewUrl.slice(previewUrl.indexOf(',') + 1);
   if (data === '') throw new Error('The photo could not be converted.');
   return { image: { data, mediaType: 'image/jpeg' }, previewUrl };

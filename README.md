@@ -6,6 +6,7 @@ confirmed count is written to the stock Google Sheet. Product photos are stored 
 ```
 web/           React app (Vite + TypeScript) for phones
 apps-script/   Code.gs: the backend, pasted into the Sheet's Apps Script project
+server/        Not in this repository: the stock server, checked out from queenscode-stock-api. See "The stock server".
 ```
 
 The data contract (tabs and columns) is in `STOCK_APP_BRIEF.md`. The app adds columns G to W to
@@ -57,7 +58,8 @@ its currency: no negative amounts, and no more decimals than the currency has.
 
 ## Auto-snap counting
 
-In the camera's **Stock, front, back** mode, with **Auto on**, the stock photo takes itself: hold
+In the camera's photo set mode (**Stock, front, back**, or **Photo set** where video counting is
+offered), with **Auto on**, the stock photo takes itself: hold
 the phone steady over one product's stock, the ring around the button fills, and the photo is
 taken with a beep. That photo is counted straight away, and the count shows in the camera with a
 second sound, while the front, back and barcode are taken by hand. **Retake** throws the stock
@@ -71,6 +73,50 @@ photo away; **Auto off** leaves the button to the counter. The beep is per photo
 - The steadiness limits in `web/src/count/autoSnap.ts` were set on simulated footage, not on
   phones. Tune them there if it fires too early or too late.
 - An iPhone with its ring switch on silent makes no sound; the screen shows the same thing.
+
+## Counting from a video
+
+For stock that is put down any way (rows behind rows, pieces lying down, small piles), one photo
+hides part of it. Switch on **Count from a video** on the Photo screen, or choose **Video set** in
+the camera. Then, for one product at a time:
+
+1. Tap the red button and move the phone slowly around the stock for a few seconds: from the
+   front, from above, from the sides. Pause a moment at each angle. Tap again to stop (it stops by
+   itself after 15 seconds).
+2. Take up to three photos of one item up close: front, back, barcode.
+3. Tap **Next**.
+
+What happens with the video:
+
+- **No video file is kept or sent.** Claude reads pictures, not video. While the video runs, the
+  camera keeps up to 8 views: the stillest look from each angle. Those views are sent together
+  and counted as one arrangement seen from several sides (`web/src/count/videoViews.ts`).
+- **The views are not added up.** Claude is told that every view shows the same items, to count
+  each part of the arrangement in the view that shows it best (usually from above), and to use
+  the other views only to find what that view hides. The wording is `VIEWS_GUIDE` in
+  `apps-script/Code.gs`, with an identical copy in the stock server's `src/vision/prompts.ts`.
+- **It is counted twice**, like a photo set: once from the views alone when the video ends, and
+  again with the detail photos on **Next**. If the two counts differ the rows are marked Low.
+- **It is a choice, not the default.** A phone that has never chosen it takes photo sets. The
+  choice is remembered on each phone. To make it the default, change the `false` in
+  `rememberedChoice(VIDEO_COUNT_KEY, false)` in `web/src/count/CountFlow.tsx`.
+
+Things to know:
+
+- **A view from above matters most.** In a test with rendered scenes of bottles and real Claude
+  calls, a tight grid of 12 counted from one front photo gave 4 and 7; from the four views of a
+  video it gave 12, five times out of five. Eleven bottles put down any way gave 9 and 6 from one
+  front photo, 10 from one raised photo, and 11 from the video five times out of five. Those were
+  clean computer pictures: real shelves are harder, so check it against hand counts before
+  trusting it.
+- **It cannot count what no view shows**, or large quantities. Hundreds of pieces in bags, sacks
+  or cartons are still counted as full packs times the pieces in each.
+- It needs the in-app camera (https), and a backend that says it takes several views
+  (`countViewLimit`). With an older backend the option is not offered.
+- The limits that decide which moments are kept were set on simulated footage, not on phones.
+  They are together at the top of `web/src/count/videoViews.ts`.
+- Each video is two requests to Claude with up to 8 pictures each, so it costs several times what
+  a photo set does. A stronger model than the default is one setting, `CLAUDE_MODEL`.
 
 ## Deleting a product
 
@@ -181,6 +227,19 @@ photo gets the same canned answer.
 After changing `Code.gs`, use Deploy > Manage deployments > Edit > New version, so the URL stays
 the same.
 
+## The stock server
+
+The backend with a real database lives in its own repository,
+[YottademTech/queenscode-stock-api](https://github.com/YottademTech/queenscode-stock-api). Check it
+out as `server/` inside this one (the folder is ignored here); its tests use the Apps Script and the
+app's contract from this repository. Its README covers running it, deploying it on Vercel, and
+moving the shop onto it.
+
+The Apps Script has two secrets in its Script Properties: `APP_SECRET`, which the app sends, and
+`SERVER_SECRET`, which only the stock server holds and which alone opens the actions it uses
+(copying changes into the Sheet, storing and trashing photos, reading the whole Sheet out). Until
+`SERVER_SECRET` is set those actions are switched off.
+
 ## Things to know
 
 - **The secret is inside the built app.** Anyone who has the app can read it. Share the link only
@@ -198,6 +257,10 @@ the same.
 - **Counting twice adds up.** Two saved photo counts of the same product and place are summed.
   The review screen warns before this happens. Use "Hand count > Correct the count" to replace a
   number.
+- **Several people at once.** Saves from different phones are written one after the other, and a
+  save sent twice is written once. When two people have the same product open, the first to save
+  wins: the second is told someone else changed it, and opens the product again to see the change
+  before making theirs. A phone sees other people's changes after its own next save or a reload.
 - **No signal.** Confirmed counts are kept on the phone and sent when the connection returns.
   Reading a photo and saving a product need a connection.
 
@@ -209,3 +272,4 @@ npm run test:backend   # runs the real Code.gs against an in-memory sheet
 npm test               # app logic
 npm run build          # type check and production build
 ```
+

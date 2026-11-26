@@ -36,7 +36,7 @@ const PHOTO_TIMEOUT_MS = 150_000;
 
 const unavailable: ApiError = {
   code: 'service_unavailable',
-  message: 'The server sent a reply the app could not read. Check the Apps Script deployment and its access setting.',
+  message: 'The server sent a reply the app could not read. Check that the server address is right and the server is running.',
 };
 
 async function call<T>(action: string, payload: object, dataSchema: z.ZodType<T>, timeoutMs: number): Promise<ApiResult<T>> {
@@ -50,6 +50,10 @@ async function call<T>(action: string, payload: object, dataSchema: z.ZodType<T>
       body: JSON.stringify({ ...payload, action, secret: APP_SECRET }),
       signal: AbortSignal.timeout(timeoutMs),
     });
+    // Some hosts refuse a large request themselves, with a page of their own that is not our JSON.
+    if (response.status === 413) {
+      return { ok: false, error: { code: 'invalid_request', message: 'These photos are too large to send together. Use fewer photos, or save some first and then add the rest.' } };
+    }
     replyText = await response.text();
   } catch {
     return { ok: false, error: { code: 'network', message: 'No connection to the server. Check your signal and try again.' } };
@@ -73,10 +77,18 @@ async function call<T>(action: string, payload: object, dataSchema: z.ZodType<T>
 export const api = {
   bootstrap: () => call('bootstrap', {}, bootstrapSchema, QUICK_TIMEOUT_MS),
   stock: () => call('stock', {}, stockSchema, QUICK_TIMEOUT_MS),
-  /** The first photo is counted; any after it are detail photos read in the same request. */
-  analyzeCount: (location: string, images: readonly EncodedImage[]) =>
-    // A lone photo keeps the form every version of the Apps Script understands.
-    call('analyzeCount', images.length === 1 ? { location, image: images[0] } : { location, images }, countAnalysisSchema, PHOTO_TIMEOUT_MS),
+  /**
+   * The first `countViews` images show the stock to count: one photo, or several views of the same
+   * stock from a video taken around it. Any after them are detail photos read in the same request.
+   */
+  analyzeCount: (location: string, images: readonly EncodedImage[], countViews = 1) =>
+    call(
+      'analyzeCount',
+      // A lone photo keeps the form every version of the backend understands.
+      images.length === 1 ? { location, image: images[0] } : { location, images, ...(countViews > 1 ? { countViews } : {}) },
+      countAnalysisSchema,
+      PHOTO_TIMEOUT_MS,
+    ),
   readProductLabel: (image: EncodedImage) => call('readProductLabel', { image }, labelReadingSchema, PHOTO_TIMEOUT_MS),
   saveCounts: (input: SaveCountsInput) => call('saveCounts', input, saveResultSchema, QUICK_TIMEOUT_MS),
   saveAdjustment: (input: AdjustmentInput) => call('adjust', input, saveResultSchema, QUICK_TIMEOUT_MS),

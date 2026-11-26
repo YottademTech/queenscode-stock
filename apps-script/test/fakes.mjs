@@ -146,13 +146,20 @@ export function makeWorkbook({ prepared = true } = {}) {
 
 // A made-up value for the automated tests only. The running app's secret comes from .env.
 export const SECRET = 'test-secret-0123456789';
+// What the stock server sends. It is not the app's secret: the server's actions refuse that one.
+export const SERVER_SECRET = 'server-only-secret-0123456789';
 
 /** Loads Code.gs into a fresh context wired to fakes. Returns the context plus what the fakes recorded. */
 export function loadBackend({ workbook = makeWorkbook(), properties = {}, claudeReplies = [], recordRequests = true, driveError = null } = {}) {
   const store = new Map(Object.entries({
-    APP_SECRET: SECRET, CLAUDE_API_KEY: 'sk-test', IMAGE_FOLDER_ID: 'folder-1', ...properties,
+    APP_SECRET: SECRET, SERVER_SECRET, CLAUDE_API_KEY: 'sk-test', IMAGE_FOLDER_ID: 'folder-1', ...properties,
   }).filter(([, value]) => value !== null));
-  const recorded = { claudeRequests: [], driveFiles: [], driveUpdates: [], folders: [], lockHeld: false, errors: [] };
+  // A test sets `lockBusy` to stand for another save holding the lock, and `whileUploading` to a
+  // function run during each photo upload, to stand for another phone's save landing meanwhile.
+  const recorded = {
+    claudeRequests: [], driveFiles: [], driveUpdates: [], folders: [], lockHeld: false, errors: [],
+    lockBusy: false, driveCallsUnderLock: 0, whileUploading: null,
+  };
 
   const spreadsheet = {
     getSheetByName: (name) => workbook.get(name) ?? null,
@@ -191,7 +198,11 @@ export function loadBackend({ workbook = makeWorkbook(), properties = {}, claude
     },
     LockService: {
       getScriptLock: () => ({
-        tryLock: () => { recorded.lockHeld = true; return true; },
+        tryLock: () => {
+          if (recorded.lockBusy) return false;
+          recorded.lockHeld = true;
+          return true;
+        },
         releaseLock: () => { recorded.lockHeld = false; },
       }),
     },
@@ -217,10 +228,13 @@ export function loadBackend({ workbook = makeWorkbook(), properties = {}, claude
             recorded.folders.push({ id: 'new-folder', name: resource.name, sharing: null });
             return { id: 'new-folder' };
           }
+          if (recorded.lockHeld) recorded.driveCallsUnderLock++;
+          if (recorded.whileUploading) recorded.whileUploading();
           recorded.driveFiles.push({ folderId: resource.parents[0], name: resource.name, mediaType: blob.mediaType, bytes: blob.bytes });
           return { id: `file-${recorded.driveFiles.length}` };
         },
         update: (resource, fileId) => {
+          if (recorded.lockHeld) recorded.driveCallsUnderLock++;
           recorded.driveUpdates.push({ fileId, ...resource });
           return { id: fileId };
         },

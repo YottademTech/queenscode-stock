@@ -30,13 +30,23 @@ function cannedClaudeReply(request) {
     return claudeAnswer({ name: 'QBH Rose Water Toner', size: '200ml', category: 'Toner', expiry: '2028-10', brand: 'QBH', variant: 'Rose water', countryOfOrigin: 'Ghana', otherDetails: [{ label: 'Claim', value: 'Alcohol free' }], labelText: 'QBH\nROSE WATER TONER\n200ml', note: 'Demo answer: Claude was not called.' });
   }
   const blank = { name: '', size: '', category: '', barcode: '', expiry: '' };
-  const photos = request.messages[0].content.filter((block) => block.type === 'image').length;
+  const content = request.messages[0].content;
+  const photos = content.filter((block) => block.type === 'image').length;
+  // Stock taken as a video arrives as several views of it, each named "View n of N".
+  const views = content.filter((block) => block.type === 'text' && /^View \d+ of \d+/.test(block.text)).length || 1;
+  const details = photos - views;
+  const counted = views > 1
+    ? { confidence: 'Medium', note: `View 1 shows 2 rows of 4; view ${views} shows 3 more behind. 11.` }
+    : { confidence: 'Low', note: 'Back row hidden; 10 to 12.' };
   // With detail photos, the listed product comes back with details read off the close-ups.
-  const listed = photos === 1
-    ? { ...blank, productCode: 'RG-BLK-500', fullCartons: 0, packSize: 0, loosePieces: 11, confidence: 'Low', note: 'Back row hidden; 10 to 12.' }
+  const listed = details === 0
+    ? { ...blank, productCode: 'RG-BLK-500', fullCartons: 0, packSize: 0, loosePieces: 11, ...counted }
     : { ...blank, productCode: 'RG-BLK-500', category: 'Body lotion', brand: 'Rich Glow', batchNumber: 'L2291', expiry: '2029-03', ingredients: 'Aqua, Glycerin, Niacinamide', labelText: 'RICH GLOW\nADVANCED WHITENING LOTION', fullCartons: 0, packSize: 0, loosePieces: 11, confidence: 'Medium', note: 'Details read from the close-ups.' };
+  const what = views > 1
+    ? `a video of ${views} views${details > 0 ? ` and ${details} detail ${details === 1 ? 'photo' : 'photos'}` : ''}`
+    : `a set of ${photos} photos`;
   return claudeAnswer({
-    photoNote: photos === 1 ? 'Demo answer: Claude was not called.' : `Demo answer for a set of ${photos} photos: Claude was not called.`,
+    photoNote: photos === 1 ? 'Demo answer: Claude was not called.' : `Demo answer for ${what}: Claude was not called.`,
     items: [
       listed,
       { productCode: 'unknown', name: 'QBH Carrot Oil', size: '100ml', category: 'Hair oil', expiry: '2030-08-06', brand: 'QBH', variant: 'Carrot', labelText: 'QBH\nCARROT OIL\n100ml', fullCartons: 2, packSize: 24, loosePieces: 3, confidence: 'Medium', note: 'Two closed cartons marked 24 x 100ml.' },
@@ -59,7 +69,12 @@ function realClaudeReply(_request, { url, options }) {
 
 const backend = loadBackend({
   claudeReplies: apiKey ? realClaudeReply : cannedClaudeReply,
-  properties: { APP_SECRET: appSecret, ...(apiKey ? { CLAUDE_API_KEY: apiKey, CLAUDE_MODEL: process.env.CLAUDE_MODEL || null } : {}) },
+  properties: {
+    APP_SECRET: appSecret,
+    // The stock server's own secret, when one is set: without it the server's actions stay switched off.
+    SERVER_SECRET: process.env.SHEET_GATEWAY_SECRET || null,
+    ...(apiKey ? { CLAUDE_API_KEY: apiKey, CLAUDE_MODEL: process.env.CLAUDE_MODEL || null } : {}),
+  },
   recordRequests: false,
 });
 backend.context.setup();

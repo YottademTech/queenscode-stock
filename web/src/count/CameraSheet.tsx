@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { rememberChoice, rememberedChoice } from '../lib/choices';
-import { COUNT_PHOTO_EDGE, captureFrame, type PreparedPhoto } from '../lib/image';
+import { COUNT_PHOTO_EDGE, VIDEO_VIEW_QUALITY, captureFrame, type PreparedPhoto } from '../lib/image';
 import { playCounted, playSnap } from '../lib/sounds';
 import { Icon } from '../shared/Icon';
 import { FRAME_SIDE, createSteadyWatcher, toGrey, type Watch } from './autoSnap';
+import { VIDEO_LOOK_EVERY_MS, VIDEO_MAX_MS, createViewPicker, viewSizes } from './videoViews';
 
 const AUTO_SNAP_KEY = 'stock.autosnap';
 /** How often the picture is checked for steadiness, in milliseconds. */
 const LOOK_EVERY_MS = 160;
+/** How long the button ignores taps after a video ends. */
+const VIDEO_END_GRACE_MS = 700;
 
 /** The count of the open set's stock photo, shown in the camera once it arrives. */
 export type CameraCount =
@@ -18,25 +21,41 @@ export type CameraCount =
 
 type CameraState = { kind: 'starting' } | { kind: 'live' } | { kind: 'failed'; message: string };
 
+/**
+ * How the photos taken here are used. `single`: every photo is counted on its own. `set`: a
+ * product's stock in one photo, then its front and back. `video`: the stock in a video taken
+ * around it, then its front and back.
+ */
+export type CaptureMode = 'single' | 'set' | 'video';
+
+/** A video being taken: how long it has run, in whole seconds, and how many views are kept so far. */
+type Recording = { seconds: number; views: number };
+
 type CameraSheetProps = {
   /** Shown at the top so the counter knows which place the shots are filed under. */
   location: string;
   /** What is happening to the shots already taken, for example "2 being counted, 5 saved". */
   progress: string;
   /**
-   * Given when the server can read photo sets. `on` is the counter's choice between every photo
-   * counted on its own and sets (a product's stock, then its front and back), and can be changed
-   * here, where the photos are taken. The rest describes the open set: how many photos it holds,
-   * how many it can hold, and what to do when the counter moves to the next product.
+   * Given when the server can read photo sets. `mode` is the counter's choice of how the photos
+   * are used, and can be changed here, where they are taken. `viewLimit` is how many views of the
+   * stock one count may hold: above 1, counting from a video is offered. The rest describes the
+   * open set: how many it holds (its stock, as a photo or a video, counts as one), how many it can
+   * hold, and what to do when the counter moves to the next product.
    */
   sets?: {
-    on: boolean; onChange: (on: boolean) => void; taken: number; limit: number; onNext: () => void;
+    mode: CaptureMode; onModeChange: (mode: CaptureMode) => void; viewLimit: number;
+    /** How much photo data one request to the backend may carry, when the backend says. */
+    requestLimit: number | undefined;
+    taken: number; limit: number; onNext: () => void;
     /** The count of the stock photo just taken, or null when there is none to show. */
     count: CameraCount | null;
     /** Throws away the open set's photos, to take the stock photo again. */
     onRetake: () => void;
   };
   onShot: (photo: PreparedPhoto) => void;
+  /** The views kept from a video taken around the stock, in the order they were taken. */
+  onVideo: (views: PreparedPhoto[]) => void;
   onClose: () => void;
 };
 
@@ -59,12 +78,17 @@ export const canUseCamera = typeof navigator !== 'undefined' && window.isSecureC
  * A full-screen camera that stays open between shots: tap, move to the next shelf, tap again.
  * Each shot is handed straight to the caller, which counts it in the background.
  *
- * In "Stock, front, back" the stock photo can take itself: with Auto on, the camera watches the
- * picture and takes the photo once it has been steady for a moment, with a beep. The count then
- * shows here, with a second sound, while the counter takes the front and back by hand.
+ * In a photo set the stock photo can take itself: with Auto on, the camera watches the picture and
+ * takes the photo once it has been steady for a moment, with a beep. The count then shows here,
+ * with a second sound, while the counter takes the front and back by hand.
+ *
+ * In a video set the stock is not one photo but a video: the counter taps, moves the phone slowly
+ * around the stock, and taps again. No video file is kept. While it runs, the camera keeps the
+ * stillest look from each angle, and those views are counted together.
  */
-export function CameraSheet({ location, progress, sets, onShot, onClose }: CameraSheetProps) {
-  const set = sets?.on ? sets : undefined;
+export function CameraSheet({ location, progress, sets, onShot, onVideo, onClose }: CameraSheetProps) {
+  const set = sets && sets.mode !== 'single' ? sets : undefined;
+  const usesVideo = set?.mode === 'video';
   const videoRef = useRef<HTMLVideoElement>(null);
   const shutterRef = useRef<HTMLButtonElement>(null);
   const [camera, setCamera] = useState<CameraState>({ kind: 'starting' });
@@ -73,6 +97,13 @@ export function CameraSheet({ location, progress, sets, onShot, onClose }: Camer
   const [autoOn, setAutoOn] = useState(() => rememberedChoice(AUTO_SNAP_KEY, true));
   const [watch, setWatch] = useState<Watch | null>(null);
   const watcher = useRef<ReturnType<typeof createSteadyWatcher> | null>(null);
+  const [recording, setRecording] = useState<Recording | null>(null);
+  const [videoProblem, setVideoProblem] = useState<string | null>(null);
+  const picker = useRef<ReturnType<typeof createViewPicker> | null>(null);
+  const videoEndedAt = useRef(-Infinity);
+  // How large a view may be depends on what the backend accepts in one request.
+  const viewEdge = useRef(viewSizes(sets?.requestLimit).edge);
+  viewEdge.current = viewSizes(sets?.requestLimit).edge;
 
   // Opens the back camera while the sheet is shown, and turns it off again when it closes.
   useEffect(() => {
@@ -105,18 +136,56 @@ export function CameraSheet({ location, progress, sets, onShot, onClose }: Camer
     };
   }, []);
 
-  // Lets a keyboard user leave the camera with Escape, as with any dialog.
+  // Lets a keyboard user leave the camera with Escape, as with any dialog. Not while a video
+  // runs: like the Done button, it waits until the video has been stopped, so the video is not lost.
+  const videoRunning = recording !== null;
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape' && !videoRunning) onClose();
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [onClose]);
+  }, [onClose, videoRunning]);
+
+  const startVideo = (viewLimit: number) => {
+    picker.current = createViewPicker(viewLimit);
+    setVideoProblem(null);
+    setRecording({ seconds: 0, views: 0 });
+    playSnap();
+  };
+
+  /** Ends the video and hands over the views kept from it. */
+  const finishVideo = () => {
+    // Already ended: it stopped by itself in the same moment as the tap.
+    if (!picker.current) return;
+    const views = picker.current.views(viewSizes(sets?.requestLimit).budget);
+    picker.current = null;
+    videoEndedAt.current = performance.now();
+    setRecording(null);
+    if (views.length === 0) {
+      setVideoProblem('Nothing could be seen in the video. Add light, hold the phone on the stock, and try again.');
+      return;
+    }
+    onVideo(views);
+    // The stock now has its pictures: the next thing Auto takes is the next product's.
+    watcher.current?.hold();
+    playSnap();
+    setShots((count) => count + 1);
+    setFlash(true);
+    window.setTimeout(() => setFlash(false), 120);
+  };
 
   const handleShutter = () => {
     const video = videoRef.current;
     if (!video || camera.kind !== 'live') return;
+    // A tap meant to stop a video that had just stopped by itself must not take a detail photo.
+    if (performance.now() - videoEndedAt.current < VIDEO_END_GRACE_MS) return;
+    // In a video set the button starts and stops the video of the stock; after that it takes detail photos.
+    if (set && usesVideo && set.taken === 0) {
+      if (recording) finishVideo();
+      else startVideo(set.viewLimit);
+      return;
+    }
     try {
       onShot(captureFrame(video, COUNT_PHOTO_EDGE));
     } catch {
@@ -134,7 +203,8 @@ export function CameraSheet({ location, progress, sets, onShot, onClose }: Camer
   // Auto only ever takes the stock photo, the first of a set. Detail photos are close-ups the
   // counter frames by hand, and in "One by one" a photo taken twice would be counted twice.
   const awaitingStockPhoto = set !== undefined && set.taken === 0;
-  const watching = camera.kind === 'live' && set !== undefined && autoOn;
+  // A video is started and stopped by hand, so nothing is taken by itself in a video set.
+  const watching = camera.kind === 'live' && set !== undefined && autoOn && !usesVideo;
   const takeShot = useRef(handleShutter);
   takeShot.current = handleShutter;
   const mayAutoSnap = useRef(awaitingStockPhoto);
@@ -167,6 +237,51 @@ export function CameraSheet({ location, progress, sets, onShot, onClose }: Camer
     return () => window.clearInterval(timer);
   }, [watching]);
 
+  // While a video runs, looks at the picture several times a second and lets the picker keep the
+  // views worth counting from. It stops by itself at the longest length.
+  const isRecording = recording !== null;
+  const endVideo = useRef(finishVideo);
+  endVideo.current = finishVideo;
+  useEffect(() => {
+    if (!isRecording) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = FRAME_SIDE;
+    canvas.height = FRAME_SIDE;
+    const drawing = canvas.getContext('2d', { willReadFrequently: true });
+    if (!drawing) return;
+    const startedAt = performance.now();
+
+    const timer = window.setInterval(() => {
+      const video = videoRef.current;
+      const views = picker.current;
+      if (!video || !views || video.videoWidth === 0) return;
+      const now = performance.now();
+      try {
+        drawing.drawImage(video, 0, 0, FRAME_SIDE, FRAME_SIDE);
+        views.offer(toGrey(drawing.getImageData(0, 0, FRAME_SIDE, FRAME_SIDE).data), now, () => captureFrame(video, viewEdge.current, VIDEO_VIEW_QUALITY));
+      } catch {
+        // A frame that could not be taken is skipped; the video goes on with the others.
+      }
+      if (now - startedAt >= VIDEO_MAX_MS) {
+        endVideo.current();
+        return;
+      }
+      // Only a visible change redraws the screen: a new second, or another view kept.
+      const next: Recording = { seconds: Math.floor((now - startedAt) / 1000), views: views.count() };
+      setRecording((current) => (current && (current.seconds !== next.seconds || current.views !== next.views) ? next : current));
+    }, VIDEO_LOOK_EVERY_MS);
+    return () => window.clearInterval(timer);
+  }, [isRecording]);
+
+  // A video is given up when its set goes away under it: the mode was changed, or the set was removed.
+  useEffect(() => {
+    if (!usesVideo || !awaitingStockPhoto) {
+      picker.current = null;
+      setRecording(null);
+    }
+    setVideoProblem(null);
+  }, [usesVideo, awaitingStockPhoto]);
+
   // Back to waiting for a stock photo (after Next or Retake): whatever the phone points at now is
   // not it, so wait for the phone to move on.
   useEffect(() => {
@@ -189,18 +304,34 @@ export function CameraSheet({ location, progress, sets, onShot, onClose }: Camer
   };
 
   const setIsFull = set !== undefined && set.taken >= set.limit;
+  const secondsLeft = recording ? Math.max(0, Math.ceil(VIDEO_MAX_MS / 1000) - recording.seconds) : 0;
+  const stockGuidance = usesVideo
+    ? recording
+      ? `Recording. Move slowly around the stock: front, above, sides. ${recording.views} ${recording.views === 1 ? 'view' : 'views'} kept, ${secondsLeft} s left. Tap to stop.`
+      : videoProblem ?? 'Tap, then move the phone slowly around the stock: front, above, sides. Tap again to stop.'
+    : !autoOn ? 'Photo 1: the stock to count.'
+      : watch?.kind === 'same-view' ? 'Move to the next product. Its photo is taken once the picture is steady.'
+        : watch?.kind === 'dark' ? 'Too dark to see the stock. Add light, or tap the button.'
+          : 'Hold the phone steady over the stock. The photo is taken for you.';
   const guidance = !set
     ? shots > 0 ? `${shots} taken. ${progress}`
       : sets ? 'Every photo is counted on its own. Keep going: counting happens in the background.'
         : 'Tap to take a photo. Keep going: counting happens in the background.'
     : set.taken === 0
-      ? !autoOn ? 'Photo 1: the stock to count.'
-        : watch?.kind === 'same-view' ? 'Move to the next product. Its photo is taken once the picture is steady.'
-          : watch?.kind === 'dark' ? 'Too dark to see the stock. Add light, or tap the button.'
-            : 'Hold the phone steady over the stock. The photo is taken for you.'
+      ? stockGuidance
       : setIsFull
         ? 'This set is full. Tap Next for the next product.'
-        : `Now the front, back and barcode up close (${set.taken} of ${set.limit} taken). Tap Next when done.`;
+        : `Now the front, back and barcode of one item up close (${set.taken} of ${set.limit} taken). Tap Next when done.`;
+  const ringFill = recording ? Math.min(1, (recording.seconds * 1000) / VIDEO_MAX_MS)
+    : awaitingStockPhoto && watch?.kind === 'steadying' ? watch.progress : 0;
+  const offersVideo = sets !== undefined && sets.viewLimit > 1;
+  const modes: readonly { mode: CaptureMode; label: string }[] = offersVideo
+    ? [{ mode: 'single', label: 'One by one' }, { mode: 'set', label: 'Photo set' }, { mode: 'video', label: 'Video set' }]
+    : [{ mode: 'single', label: 'One by one' }, { mode: 'set', label: 'Stock, front, back' }];
+  const shutterLabel = !set ? 'Take photo'
+    : set.taken > 0 ? 'Take a detail photo'
+      : !usesVideo ? 'Take the count photo'
+        : recording ? 'Stop the video' : 'Start the video of the stock';
 
   return (
     <div className="camera" role="dialog" aria-modal="true" aria-label="Camera">
@@ -208,7 +339,7 @@ export function CameraSheet({ location, progress, sets, onShot, onClose }: Camer
       {flash && <div className="camera-flash" aria-hidden="true" />}
 
       <div className="camera-top">
-        <button type="button" className="camera-close" onClick={onClose}>
+        <button type="button" className="camera-close" disabled={isRecording} onClick={onClose}>
           <Icon name="close" />
           Done
         </button>
@@ -217,16 +348,14 @@ export function CameraSheet({ location, progress, sets, onShot, onClose }: Camer
 
       <div className="camera-bottom">
         {sets && (
-          <fieldset className="camera-mode">
+          <fieldset className={`camera-mode${offersVideo ? ' three' : ''}`} disabled={isRecording}>
             <legend className="visually-hidden">How the photos are used</legend>
-            <label>
-              <input type="radio" name="camera-mode" className="visually-hidden" checked={!sets.on} onChange={() => sets.onChange(false)} />
-              One by one
-            </label>
-            <label>
-              <input type="radio" name="camera-mode" className="visually-hidden" checked={sets.on} onChange={() => sets.onChange(true)} />
-              Stock, front, back
-            </label>
+            {modes.map(({ mode, label }) => (
+              <label key={mode}>
+                <input type="radio" name="camera-mode" className="visually-hidden" checked={sets.mode === mode} onChange={() => sets.onModeChange(mode)} />
+                {label}
+              </label>
+            ))}
           </fieldset>
         )}
         <p className="camera-progress" role="status" aria-live="polite">
@@ -248,7 +377,7 @@ export function CameraSheet({ location, progress, sets, onShot, onClose }: Camer
         )}
         {set && <p className="camera-status">{progress}</p>}
         <div className="camera-controls">
-          {set && set.taken === 0 && (
+          {set && set.taken === 0 && !usesVideo && (
             <button type="button" className="camera-side camera-auto" aria-pressed={autoOn} title="Take the stock photo by itself once the picture is steady" onClick={handleAutoChange}>
               Auto {autoOn ? 'on' : 'off'}
             </button>
@@ -259,14 +388,16 @@ export function CameraSheet({ location, progress, sets, onShot, onClose }: Camer
               Retake
             </button>
           )}
-          {/* The ring fills while the picture stays steady; when it closes, the photo is taken. */}
-          <span className="camera-shutter-ring" style={{ '--steady': awaitingStockPhoto && watch?.kind === 'steadying' ? watch.progress : 0 } as CSSProperties}>
+          {/* The ring fills while the picture stays steady, and the photo is taken when it closes.
+              During a video it fills with the time used. */}
+          <span className="camera-shutter-ring" style={{ '--steady': ringFill } as CSSProperties}>
             <button
               ref={shutterRef}
               type="button"
-              className="camera-shutter"
+              className={`camera-shutter${usesVideo && awaitingStockPhoto ? (recording ? ' recording' : ' video') : ''}`}
               disabled={camera.kind !== 'live' || setIsFull}
-              aria-label={!set ? 'Take photo' : set.taken === 0 ? 'Take the count photo' : 'Take a detail photo'}
+              aria-label={shutterLabel}
+              aria-pressed={usesVideo && awaitingStockPhoto ? isRecording : undefined}
               onClick={handleShutter}
             />
           </span>

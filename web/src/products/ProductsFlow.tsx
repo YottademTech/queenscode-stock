@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Bootstrap, Product } from '../api/contract';
 import { driveThumbnail } from '../lib/image';
 import { NoticeBox, type Notice } from '../shared/fields';
@@ -12,7 +12,7 @@ const CARDS_IN_VIEW = 3;
 
 type Editing = { kind: 'list' } | { kind: 'adding' } | { kind: 'editing'; product: Product };
 
-type ProductsFlowProps = { bootstrap: Bootstrap; onSaved: () => void };
+type ProductsFlowProps = { bootstrap: Bootstrap; onSaved: () => void | Promise<void> };
 
 function missingDetails(product: Product): string[] {
   return [
@@ -45,10 +45,30 @@ export function ProductsFlow({ bootstrap, onSaved }: ProductsFlowProps) {
     // Only when the list appears: while it is showing, the strip itself is what moves.
   }, [isList]);
 
+  // After a save the list reloads in the background. A product opened before that lands would be
+  // the copy from before the save, and saving it again would be refused as out of date. So a tap
+  // on a product waits for the reload, and opens the product as it is then.
+  const reloading = useRef<Promise<unknown>>(Promise.resolve());
+  const [opening, setOpening] = useState<{ code: string; ready: boolean } | null>(null);
+  const reloadList = () => {
+    reloading.current = Promise.resolve(onSaved()).catch(() => {});
+  };
+  const openProduct = (code: string) => {
+    setNotice(null);
+    setOpening({ code, ready: false });
+    void reloading.current.then(() => setOpening((current) => (current?.code === code ? { code, ready: true } : current)));
+  };
+  useEffect(() => {
+    if (!opening?.ready) return;
+    const product = bootstrap.products.find((candidate) => candidate.code === opening.code);
+    setOpening(null);
+    if (product) setEditing({ kind: 'editing', product });
+  }, [opening, bootstrap.products]);
+
   const handleDone = (message: string) => {
     setEditing({ kind: 'list' });
     setNotice({ tone: 'success', text: message });
-    onSaved();
+    reloadList();
   };
 
   if (editing.kind !== 'list') {
@@ -64,6 +84,7 @@ export function ProductsFlow({ bootstrap, onSaved }: ProductsFlowProps) {
           photoLimit={bootstrap.productPhotoLimit}
           currencies={bootstrap.currencies}
           onDone={handleDone}
+          onStale={reloadList}
           onCancel={() => setEditing({ kind: 'list' })}
         />
       </section>
@@ -155,7 +176,7 @@ export function ProductsFlow({ bootstrap, onSaved }: ProductsFlowProps) {
           const price = formatPrice(product.price, product.currency, bootstrap.currencies);
           return (
             <li key={product.code}>
-              <button type="button" className="product-card" title={product.name} onClick={() => { setNotice(null); setEditing({ kind: 'editing', product }); }}>
+              <button type="button" className="product-card" title={product.name} aria-busy={opening?.code === product.code} onClick={() => openProduct(product.code)}>
                 <span className="card-photo">
                   {thumbnail ? <img src={thumbnail} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span className="card-placeholder" aria-hidden="true">＋</span>}
                   {missing.length > 0 && <span className="card-flag" aria-hidden="true" />}
