@@ -3,6 +3,7 @@ import { api, isConfigured } from './api/client';
 import type { Bootstrap } from './api/contract';
 import { CountFlow } from './count/CountFlow';
 import { HandCountFlow } from './handcount/HandCountFlow';
+import { useInstallOffer } from './lib/install';
 import { outbox } from './lib/saves';
 import { ProductsFlow } from './products/ProductsFlow';
 import { SignIn, rememberedSignIn, signOut } from './SignIn';
@@ -31,6 +32,7 @@ export function App() {
   const [isSending, setIsSending] = useState(false);
   const waitingSaves = useSyncExternalStore(outbox.subscribe, outbox.getSnapshot);
   const menu = useRef<HTMLDialogElement>(null);
+  const install = useInstallOffer();
 
   const reload = useCallback(async () => {
     const result = await api.bootstrap();
@@ -105,6 +107,18 @@ export function App() {
             {logoUrl && <img src={logoUrl} alt="QueensCode Beauty Haven" className="brand-logo" />}
             {!logoUrl && <p className="brand-name">QueensCode</p>}
           </div>
+
+          {install.kind === 'prompt' && (
+            <button type="button" className="sidebar-install" onClick={() => void install.install()}>
+              <Icon name="plus" size={20} />
+              Install the app
+            </button>
+          )}
+          {install.kind === 'ios' && (
+            <p className="sidebar-install-hint">
+              To install the app: tap <strong>Share</strong> in Safari, then <strong>Add to Home Screen</strong>.
+            </p>
+          )}
 
           <button type="button" className="sidebar-sign-out" onClick={handleSignOut}>
             <Icon name="back" size={20} />

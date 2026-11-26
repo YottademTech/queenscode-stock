@@ -161,6 +161,19 @@ Save the logo as `web/src/assets/logo.png` (or .jpg, .webp, .svg) and it appears
 side panel, shown whole and up to 10rem tall. The side panel opens from the menu button at the top right
 and also holds **Sign out**.
 
+## Installing the app on a phone
+
+The app can be installed like any other app, with its own icon and no browser bars.
+
+- **Android (Chrome):** open the menu (top right) and tap **Install the app**, or use Chrome's own
+  menu > Install app.
+- **iPhone (Safari):** tap **Share**, then **Add to Home Screen**. The menu says so on an iPhone.
+
+The installed app keeps its own files on the phone (`web/public/sw.js`), so it opens fast and
+opens without a signal. It never keeps the stock server's answers: product lists, stock figures and
+saves always come from the server. A new version shows the next time the app is opened online.
+The icons are made from `web/src/assets/logo.png`; replace the PNGs in `web/public/` to change them.
+
 ## Signing in
 
 The app opens on a sign-in screen where the counter picks their name from a list and types a 4-digit code (`4444` for

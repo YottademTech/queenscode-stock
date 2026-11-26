@@ -748,6 +748,10 @@ function fetchClaudeMessage(apiKey, payload) {
     if (!retryable) {
       throw new AppError('claude_unavailable', 'This photo could not be read (error ' + status + ').');
     }
+    // An error that came back only after a long wait would make the counter wait as long again.
+    if (status !== 0 && Date.now() - started > SLOW_READ_MS) {
+      throw new AppError('claude_unavailable', 'Reading these photos took too long. Try again, with fewer photos if it keeps happening.');
+    }
     if (attempt < CLAUDE_ATTEMPTS) Utilities.sleep(1000 * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 500));
   }
   throw new AppError('claude_unavailable', 'The photo reader is busy or unreachable. Wait a moment and try again.');
@@ -1111,7 +1115,10 @@ function mirrorProduct(ss, settings, event) {
   const row = existing ? existing.row : findEmptyProductRows(sheet, 1)[0];
   const cells = productCells(product);
   cells[IMAGE_COLUMN - 1] = urls.map(sheetText).join('\n');
-  sheet.getRange(row, 1, 1, PRODUCT_COLUMN_COUNT).setValues([cells]);
+  // A row that is already there keeps its code cell as it is: the code is how it was found, and
+  // writing it again could let Sheets turn a code such as 007 into a number.
+  if (existing) sheet.getRange(row, 2, 1, PRODUCT_COLUMN_COUNT - 1).setValues([cells.slice(1)]);
+  else sheet.getRange(row, 1, 1, PRODUCT_COLUMN_COUNT).setValues([cells]);
 }
 
 function mirrorProductDeleted(ss, settings, event) {
@@ -1388,12 +1395,18 @@ function matchProductByName(products, details) {
 
 /**
  * Product names must be unique because the Stock tab matches hand corrections by name. A second
- * size of a listed product gets its size added, with the name cut short if needed to stay a valid name.
+ * size of a listed product gets its size added. When that makes the name too long it is refused,
+ * not cut short: two names cut at the same place would be the same name.
  */
 function uniqueProductName(products, details) {
   const taken = products.some((product) => sameName(product.name, details.name));
   if (!taken || !details.size) return details.name;
-  return details.name.slice(0, PRODUCT_NAME_MAX - 1 - details.size.length).trim() + ' ' + details.size;
+  const sized = details.name + ' ' + details.size;
+  if (sized.length > PRODUCT_NAME_MAX) {
+    throw new AppError('invalid_request', '"' + clip(details.name, 40) + '…" is already a product, and with the size ' + details.size
+      + ' added the name is too long. Shorten the name to ' + (PRODUCT_NAME_MAX - 1 - details.size.length) + ' characters or fewer, then save again.');
+  }
+  return sized;
 }
 
 function sameName(left, right) {

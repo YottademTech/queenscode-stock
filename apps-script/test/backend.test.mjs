@@ -1210,20 +1210,35 @@ test('deleting a product the Sheet never held still clears what was counted for 
   assert.equal(productRows(backend.workbook).length, 2, 'the products that are there are untouched');
 });
 
-test('a name lengthened by its size stays a valid name, and a code is never one Sheets reads as a date or number', () => {
+test('a second size whose name would be too long is refused, never cut into a name another product has', () => {
   const backend = loadBackend();
   const longName = 'QBH ' + 'Very Long Product Name '.repeat(5).trim();
   assert.equal(longName.length, 118);
   backend.post(saveProduct({ name: longName, size: '250ml' }));
-  // The same name in another size is another product, told apart by its size at the end of the name.
-  const reply = backend.post(saveCounts([countRow({ productCode: null, newProduct: newProduct({ name: longName, size: '500ml family size', barcode: '' }) })]));
-  assert.equal(reply.ok, true);
-  const second = backend.post({ action: 'bootstrap' }).data.products[3];
-  assert.equal(second.name.length <= 120, true);
-  assert.match(second.name, /^QBH Very Long .* 500ml family size$/);
-  // It can be edited afterwards: its own name is accepted back.
-  assert.equal(backend.post(saveProduct({ code: second.code, name: second.name, size: second.size }, { requestId: 'request-0102' })).ok, true);
+  const newSize = (requestId) => backend.post(saveCounts([countRow({ productCode: null, newProduct: newProduct({ name: longName, size: '500ml', barcode: '' }) })], { requestId }));
 
+  // Counted twice as a new 500ml product: both are refused, so no two products end up named alike.
+  for (const requestId of ['request-0101', 'request-0102']) {
+    const reply = newSize(requestId);
+    assert.equal(reply.error.code, 'invalid_request');
+    assert.match(reply.error.message, /with the size 500ml added the name is too long. Shorten the name to 114 characters or fewer/);
+  }
+  const names = backend.post({ action: 'bootstrap' }).data.products.map((product) => product.name);
+  assert.equal(new Set(names).size, names.length);
+  assert.equal(names.length, 3);
+
+  // A name that fits still gets its size, and counting it again finds the same product.
+  const shortName = 'QBH Carrot Oil Body Lotion';
+  backend.post(saveProduct({ name: shortName, size: '250ml' }, { requestId: 'request-0103' }));
+  for (const requestId of ['request-0104', 'request-0105']) {
+    assert.equal(backend.post(saveCounts([countRow({ productCode: null, newProduct: newProduct({ name: shortName, size: '500ml', barcode: '' }) })], { requestId })).ok, true);
+  }
+  const sized = backend.post({ action: 'bootstrap' }).data.products.filter((product) => product.name === shortName + ' 500ml');
+  assert.equal(sized.length, 1);
+});
+
+test('a code is never one Sheets reads as a date or number', () => {
+  const backend = loadBackend();
   const codeFor = (name, size, n) => {
     backend.post(saveProduct({ name, size }, { requestId: `request-03${n}0` }));
     return backend.post({ action: 'bootstrap' }).data.products.find((product) => product.name === name).code;
@@ -1257,6 +1272,36 @@ test('reading the Sheet out names the hand entries it cannot carry over, and the
     { tab: 'Form_Adjustments', row: 8, why: 'it has no count date' },
   ]);
   assert.deepEqual(all.handledRequests, [{ id: 'request-0900', action: 'adjust' }]);
+});
+
+test('an error reply that came back only after a long wait is not sent again either', () => {
+  let clock = 1700000000000;
+  const backend = loadBackend({
+    claudeReplies: () => {
+      clock += 70000; // the reply took 70 seconds, and it is an overloaded error
+      return { status: 529, body: { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } } };
+    },
+  });
+  runInContext('Date', backend.context).now = () => clock;
+  const reply = backend.post({ action: 'analyzeCount', location: 'Shop shelf', image: PHOTO });
+  assert.match(reply.error.message, /took too long/);
+  assert.equal(backend.recorded.claudeRequests.length, 1);
+});
+
+test('the stock server\'s copy of a product leaves the code cell of a row that is already there as it is', () => {
+  const backend = loadBackend();
+  const products = backend.workbook.get('Products');
+  const writes = [];
+  const getRange = products.getRange.bind(products);
+  products.getRange = (row, column, ...rest) => {
+    const range = getRange(row, column, ...rest);
+    const setValues = range.setValues.bind(range);
+    range.setValues = (values) => { writes.push([row, column]); return setValues(values); };
+    return range;
+  };
+  backend.post(mirror({ kind: 'product', product: mirroredProduct({ code: 'RG-YEL', name: 'Rich Glow Yellow Tone Lotion', brand: 'Rich Glow' }) }));
+  assert.deepEqual(writes, [[3, 2]]);
+  assert.deepEqual(products.rowValues(3, 10).filter((_, index) => [0, 1, 9].includes(index)), ['RG-YEL', 'Rich Glow Yellow Tone Lotion', 'Rich Glow']);
 });
 
 test('a read that was cut off after running long is not sent, and paid for, a second time', () => {

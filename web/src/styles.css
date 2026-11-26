@@ -136,6 +136,13 @@ ul { margin: 0; padding: 0; list-style: none; }
 }
 @keyframes sparkle { to { background-position: 100% 0; } }
 .sidebar-panel .sidebar-sign-out { margin: auto 1rem 0 max(1rem, env(safe-area-inset-left, 0px)); }
+/* Above Sign out: installing the app on the phone, where the browser allows it. */
+.sidebar-install {
+  font: inherit; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; min-height: 3rem; padding: 0 1.25rem;
+  margin: auto 1rem 0.75rem max(1rem, env(safe-area-inset-left, 0px)); color: var(--black); background: var(--gold-shine); border: 0; border-radius: 10rem; cursor: pointer;
+}
+.sidebar-install-hint { margin: auto 1rem 0.75rem max(1rem, env(safe-area-inset-left, 0px)); font-size: 0.9rem; line-height: 1.45; color: #e9e2cd; }
+.sidebar-install + .sidebar-sign-out, .sidebar-install-hint + .sidebar-sign-out { margin-top: 0; }
 .sidebar-sign-out {
   font: inherit; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; min-height: 3rem; padding: 0 1.25rem;
   color: #fff; background: rgb(255 255 255 / 0.1); border: 1px solid rgb(247 224 138 / 0.4); border-radius: 10rem; cursor: pointer;
