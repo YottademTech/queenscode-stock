@@ -11,6 +11,8 @@ const AUTO_SNAP_KEY = 'stock.autosnap';
 const LOOK_EVERY_MS = 160;
 /** How long the button ignores taps after a video ends. */
 const VIDEO_END_GRACE_MS = 700;
+/** The close-ups asked for after the video of the stock, one by one, in this order. */
+const VIDEO_DETAIL_SHOTS = ['the front', 'the back', 'the barcode'] as const;
 
 /** The count of the open set's stock photo, shown in the camera once it arrives. */
 export type CameraCount =
@@ -71,6 +73,11 @@ function keepRefocusing(stream: MediaStream) {
   track.applyConstraints({ advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet] }).catch(() => {});
 }
 
+/** How many close-ups a video set asks for: the front, back and barcode, as far as the set has room. */
+function detailTarget(setLimit: number): number {
+  return Math.max(1, Math.min(VIDEO_DETAIL_SHOTS.length, setLimit - 1));
+}
+
 /** Whether this browser lets a page open the camera. It needs https (or localhost). */
 export const canUseCamera = typeof navigator !== 'undefined' && window.isSecureContext && !!navigator.mediaDevices?.getUserMedia;
 
@@ -84,7 +91,9 @@ export const canUseCamera = typeof navigator !== 'undefined' && window.isSecureC
  *
  * In a video set the stock is not one photo but a video: the counter taps, moves the phone slowly
  * around the stock, and taps again. No video file is kept. While it runs, the camera keeps the
- * stillest look from each angle, and those views are counted together.
+ * stillest look from each angle, and those views are counted together. The camera then asks for
+ * the front, back and barcode of one item, one at a time, and closes the product by itself after
+ * the last, ready for the next product's video. The counter can finish early, or cancel the product.
  */
 export function CameraSheet({ location, progress, sets, onShot, onVideo, onClose }: CameraSheetProps) {
   const set = sets && sets.mode !== 'single' ? sets : undefined;
@@ -99,6 +108,8 @@ export function CameraSheet({ location, progress, sets, onShot, onVideo, onClose
   const watcher = useRef<ReturnType<typeof createSteadyWatcher> | null>(null);
   const [recording, setRecording] = useState<Recording | null>(null);
   const [videoProblem, setVideoProblem] = useState<string | null>(null);
+  // A video set was just closed: said until the next video starts, so the counter knows it went.
+  const [videoSetSent, setVideoSetSent] = useState(false);
   const picker = useRef<ReturnType<typeof createViewPicker> | null>(null);
   const videoEndedAt = useRef(-Infinity);
   // How large a view may be depends on what the backend accepts in one request.
@@ -150,6 +161,7 @@ export function CameraSheet({ location, progress, sets, onShot, onVideo, onClose
   const startVideo = (viewLimit: number) => {
     picker.current = createViewPicker(viewLimit);
     setVideoProblem(null);
+    setVideoSetSent(false);
     setRecording({ seconds: 0, views: 0 });
     playSnap();
   };
@@ -175,6 +187,20 @@ export function CameraSheet({ location, progress, sets, onShot, onVideo, onClose
     window.setTimeout(() => setFlash(false), 120);
   };
 
+  /** Closes the open set and sends it to be counted. In a video set, back to the next product's video. */
+  const finishSet = () => {
+    if (!set) return;
+    set.onNext();
+    if (usesVideo) setVideoSetSent(true);
+  };
+
+  /** Throws away the open set: in a video set, its video and photos, back to the start. */
+  const cancelSet = () => {
+    if (!set) return;
+    set.onRetake();
+    setVideoSetSent(false);
+  };
+
   const handleShutter = () => {
     const video = videoRef.current;
     if (!video || camera.kind !== 'live') return;
@@ -198,6 +224,10 @@ export function CameraSheet({ location, progress, sets, onShot, onVideo, onClose
     setShots((count) => count + 1);
     setFlash(true);
     window.setTimeout(() => setFlash(false), 120);
+    // The last close-up after a video: the product is done, and the next one's video is next.
+    // `set.taken` is still the count from before this photo, and the video is one of them, so it
+    // is also the number of close-ups now taken.
+    if (set && usesVideo && set.taken >= detailTarget(set.limit)) finishSet();
   };
 
   // Auto only ever takes the stock photo, the first of a set. Detail photos are close-ups the
@@ -282,6 +312,11 @@ export function CameraSheet({ location, progress, sets, onShot, onVideo, onClose
     setVideoProblem(null);
   }, [usesVideo, awaitingStockPhoto]);
 
+  // "Sent" belongs to the video set just closed, not to a set taken another way.
+  useEffect(() => {
+    if (!usesVideo) setVideoSetSent(false);
+  }, [usesVideo]);
+
   // Back to waiting for a stock photo (after Next or Retake): whatever the phone points at now is
   // not it, so wait for the phone to move on.
   useEffect(() => {
@@ -304,11 +339,23 @@ export function CameraSheet({ location, progress, sets, onShot, onVideo, onClose
   };
 
   const setIsFull = set !== undefined && set.taken >= set.limit;
+  // A video set's second step: the close-ups, after the video (which counts as the set's first).
+  const takingDetails = set !== undefined && usesVideo && set.taken > 0;
+  const detailsTaken = set ? set.taken - 1 : 0;
+  const detailsWanted = set ? detailTarget(set.limit) : 0;
+  const nextDetail = VIDEO_DETAIL_SHOTS[Math.min(detailsTaken, VIDEO_DETAIL_SHOTS.length - 1)];
+  // While a video set is under way, the way of taking photos stays as it is: changing it would lose the set.
+  const inVideoSet = usesVideo && (isRecording || takingDetails);
+  const videoStep = !usesVideo ? null
+    : takingDetails ? `Step 2 of 2 · Photo ${detailsTaken + 1} of ${detailsWanted}: ${nextDetail}`
+      : 'Step 1 of 2 · Video of the stock';
   const secondsLeft = recording ? Math.max(0, Math.ceil(VIDEO_MAX_MS / 1000) - recording.seconds) : 0;
   const stockGuidance = usesVideo
     ? recording
       ? `Recording. Move slowly around the stock: front, above, sides. ${recording.views} ${recording.views === 1 ? 'view' : 'views'} kept, ${secondsLeft} s left. Tap to stop.`
-      : videoProblem ?? 'Tap, then move the phone slowly around the stock: front, above, sides. Tap again to stop.'
+      : videoProblem ?? (videoSetSent
+        ? 'Sent for counting. Tap to record the next product: move slowly around it, then tap again.'
+        : 'Tap, then move the phone slowly around the stock: front, above, sides. Tap again to stop.')
     : !autoOn ? 'Photo 1: the stock to count.'
       : watch?.kind === 'same-view' ? 'Move to the next product. Its photo is taken once the picture is steady.'
         : watch?.kind === 'dark' ? 'Too dark to see the stock. Add light, or tap the button.'
@@ -319,6 +366,8 @@ export function CameraSheet({ location, progress, sets, onShot, onVideo, onClose
         : 'Tap to take a photo. Keep going: counting happens in the background.'
     : set.taken === 0
       ? stockGuidance
+      : takingDetails
+        ? `Take ${nextDetail} of one item, up close and sharp. Cancel to drop this product, or Finish to send it now.`
       : setIsFull
         ? 'This set is full. Tap Next for the next product.'
         : `Now the front, back and barcode of one item up close (${set.taken} of ${set.limit} taken). Tap Next when done.`;
@@ -329,6 +378,7 @@ export function CameraSheet({ location, progress, sets, onShot, onVideo, onClose
     ? [{ mode: 'single', label: 'One by one' }, { mode: 'set', label: 'Photo set' }, { mode: 'video', label: 'Video set' }]
     : [{ mode: 'single', label: 'One by one' }, { mode: 'set', label: 'Stock, front, back' }];
   const shutterLabel = !set ? 'Take photo'
+    : takingDetails ? `Take photo ${detailsTaken + 1} of ${detailsWanted}: ${nextDetail}`
     : set.taken > 0 ? 'Take a detail photo'
       : !usesVideo ? 'Take the count photo'
         : recording ? 'Stop the video' : 'Start the video of the stock';
@@ -347,8 +397,8 @@ export function CameraSheet({ location, progress, sets, onShot, onVideo, onClose
       </div>
 
       <div className="camera-bottom">
-        {sets && (
-          <fieldset className={`camera-mode${offersVideo ? ' three' : ''}`} disabled={isRecording}>
+        {sets && !inVideoSet && (
+          <fieldset className={`camera-mode${offersVideo ? ' three' : ''}`}>
             <legend className="visually-hidden">How the photos are used</legend>
             {modes.map(({ mode, label }) => (
               <label key={mode}>
@@ -357,6 +407,18 @@ export function CameraSheet({ location, progress, sets, onShot, onVideo, onClose
               </label>
             ))}
           </fieldset>
+        )}
+        {videoStep && camera.kind === 'live' && (
+          <div className="camera-step">
+            <p>{videoStep}</p>
+            {takingDetails && (
+              <ol className="camera-pips" aria-hidden="true">
+                {Array.from({ length: detailsWanted }, (_, index) => (
+                  <li key={index} className={index < detailsTaken ? 'done' : index === detailsTaken ? 'now' : undefined} />
+                ))}
+              </ol>
+            )}
+          </div>
         )}
         <p className="camera-progress" role="status" aria-live="polite">
           {camera.kind === 'starting' && 'Opening the camera…'}
@@ -382,12 +444,17 @@ export function CameraSheet({ location, progress, sets, onShot, onVideo, onClose
               Auto {autoOn ? 'on' : 'off'}
             </button>
           )}
-          {set && set.taken > 0 && (
-            <button type="button" className="camera-side" onClick={set.onRetake}>
+          {set && set.taken > 0 && (takingDetails ? (
+            <button type="button" className="camera-side" aria-label="Cancel this product: drop its video and photos" onClick={cancelSet}>
+              <Icon name="close" size={18} />
+              Cancel
+            </button>
+          ) : (
+            <button type="button" className="camera-side" onClick={cancelSet}>
               <Icon name="refresh" size={18} />
               Retake
             </button>
-          )}
+          ))}
           {/* The ring fills while the picture stays steady, and the photo is taken when it closes.
               During a video it fills with the time used. */}
           <span className="camera-shutter-ring" style={{ '--steady': ringFill } as CSSProperties}>
@@ -401,10 +468,11 @@ export function CameraSheet({ location, progress, sets, onShot, onVideo, onClose
               onClick={handleShutter}
             />
           </span>
-          {set && (
-            <button type="button" className="camera-next" disabled={set.taken === 0} onClick={set.onNext}>
+          {/* In a video set there is nothing to finish until the video is in, and the button only finishes early. */}
+          {set && (!usesVideo || takingDetails) && (
+            <button type="button" className="camera-next" disabled={set.taken === 0} onClick={finishSet}>
               <Icon name="check" size={18} />
-              Next
+              {takingDetails ? 'Finish' : 'Next'}
             </button>
           )}
         </div>

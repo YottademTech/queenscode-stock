@@ -83,8 +83,14 @@ the camera. Then, for one product at a time:
 1. Tap the red button and move the phone slowly around the stock for a few seconds: from the
    front, from above, from the sides. Pause a moment at each angle. Tap again to stop (it stops by
    itself after 15 seconds).
-2. Take up to three photos of one item up close: front, back, barcode.
-3. Tap **Next**.
+2. The camera switches to step 2 and asks for three close-ups of one item, one at a time: the
+   front, the back, the barcode.
+3. After the third photo the product is sent for counting by itself, and the camera is back at
+   step 1, ready for the next product's video.
+
+In step 2, **Finish** sends the product with fewer photos (for example, when it has no barcode),
+and **Cancel** drops its video and photos and starts it again. The choice between One by one,
+Photo set and Video set is hidden until the product is finished or cancelled.
 
 What happens with the video:
 
