@@ -217,7 +217,15 @@ export function ProductForm({ product, countedPieces, canDelete, photoLimit, cur
           <input type="file" accept="image/*" capture="environment" className="visually-hidden" disabled={activity !== 'idle'} onChange={handlePhoto} />
         </label>
       </div>
-      <h3>{product ? `Edit ${product.name}` : 'Add a product'}</h3>
+      {/* "Edit product" sits on a line of its own, so a long name starts on the left under it. */}
+      <h3 className={product ? 'form-title' : undefined}>
+        {product ? (
+          <>
+            <span className="form-title-action">Edit product</span>
+            <span className="form-title-name">{product.name}</span>
+          </>
+        ) : 'Add a product'}
+      </h3>
 
       <fieldset className="product-photo" ref={photoSection}>
         <legend>{onePhotoOnly ? 'Product photo' : 'Product photos'}</legend>

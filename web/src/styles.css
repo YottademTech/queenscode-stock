@@ -628,6 +628,11 @@ details[open] > summary::after { transform: translateY(0.25rem) rotate(-135deg);
 .saved-name small { color: var(--muted); font-size: 0.8rem; }
 .saved-pieces { font-size: 1.25rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 
+/* The product being edited: "Edit product" small above, the name on its own line below. */
+.form-title { display: flex; flex-direction: column; gap: 0.15rem; }
+.form-title-action { font-size: 0.8rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.form-title-name { overflow-wrap: anywhere; }
+
 /* The in-app camera covers the whole screen, bars included, and stays open between shots. */
 .camera { position: fixed; inset: 0; z-index: 10; background: #000; color: #fff; display: flex; flex-direction: column; justify-content: space-between; }
 .camera-view { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
